@@ -86,7 +86,7 @@ if archivo_subido is not None:
 
             df_horarios = pd.DataFrame(horarios)
             
-            # Función para aplicar estilos combinados (Día + Semáforo)
+            # Función para aplicar estilos a las filas de datos
             def aplicar_estilos(row):
                 dia = row['Fecha y Horario'].split()[0]
                 colores_dia = {
@@ -99,32 +99,36 @@ if archivo_subido is not None:
                     'domingo': 'background-color: #e6e6e6'
                 }
                 
-                # Asignamos el color del día a toda la fila primero
                 color_base = colores_dia.get(dia, '')
                 estilos = [color_base] * len(row)
                 
-                # Reglas especiales
                 if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
                     estilos = ['background-color: #d9d9d9'] * len(row)
                 else:
-                    # Encontrar en qué posición exacta está la columna 'Pendientes'
                     idx_pend = row.index.get_loc('Pendientes')
                     pendientes = int(row['Pendientes'])
                     
-                    # 🚥 SEMÁFORO 🚥 (Sobrescribimos solo el color de esa celda)
                     if pendientes >= 10:
-                        # ROJO (con letras blancas y en negritas para que resalte)
                         estilos[idx_pend] = 'background-color: #ff4d4d; color: white; font-weight: bold;' 
                     elif 4 <= pendientes <= 9:
-                        # AMARILLO (letras negras y negritas)
                         estilos[idx_pend] = 'background-color: #ffcc00; color: black; font-weight: bold;'
                     elif 1 <= pendientes <= 3:
-                        # VERDE (letras blancas y negritas)
                         estilos[idx_pend] = 'background-color: #00cc66; color: white; font-weight: bold;'
                         
                 return estilos
             
-            df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
+            # 🎨 APLICAR ESTILOS: Filas de datos + ESTILO DE ENCABEZADOS (Títulos)
+            df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1).set_table_styles([
+                {
+                    'selector': 'th',
+                    'props': [
+                        ('font-weight', 'bold'),          # Títulos en Negrita
+                        ('background-color', '#404040'), # Fondo gris oscuro elegante
+                        ('color', 'white'),              # Texto blanco para contrastar
+                        ('text-align', 'center')         # Centrar los títulos
+                    ]
+                }
+            ])
             
             # Preparar Excel para descarga en web
             output = io.BytesIO()
