@@ -11,7 +11,7 @@ st.title("🦊 Generador de Horarios de Capacitación")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
 # Botón para subir archivo
-archivo_subido = st.file_uploader("📂 Sube tu archivo reporte.xlsx aquí", type=['xlsx'])
+archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
 
 if archivo_subido is not None:
     try:
@@ -86,22 +86,55 @@ if archivo_subido is not None:
 
             df_horarios = pd.DataFrame(horarios)
             
-            def colorear_filas(row):
+            # Función para aplicar estilos combinados (Día + Semáforo)
+            def aplicar_estilos(row):
                 dia = row['Fecha y Horario'].split()[0]
-                colores = {'lunes': 'background-color: #ffcccc', 'martes': 'background-color: #ccffcc', 'miércoles': 'background-color: #ffffcc', 'jueves': 'background-color: #ffe6cc', 'viernes': 'background-color: #cce5ff', 'sábado': 'background-color: #e6ccff', 'domingo': 'background-color: #e6e6e6'}
-                return ['background-color: #d9d9d9' if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN' else colores.get(dia, '')] * len(row)
+                colores_dia = {
+                    'lunes': 'background-color: #ffcccc', 
+                    'martes': 'background-color: #ccffcc', 
+                    'miércoles': 'background-color: #ffffcc', 
+                    'jueves': 'background-color: #ffe6cc', 
+                    'viernes': 'background-color: #cce5ff', 
+                    'sábado': 'background-color: #e6ccff', 
+                    'domingo': 'background-color: #e6e6e6'
+                }
+                
+                # Asignamos el color del día a toda la fila primero
+                color_base = colores_dia.get(dia, '')
+                estilos = [color_base] * len(row)
+                
+                # Reglas especiales
+                if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
+                    estilos = ['background-color: #d9d9d9'] * len(row)
+                else:
+                    # Encontrar en qué posición exacta está la columna 'Pendientes'
+                    idx_pend = row.index.get_loc('Pendientes')
+                    pendientes = int(row['Pendientes'])
+                    
+                    # 🚥 SEMÁFORO 🚥 (Sobrescribimos solo el color de esa celda)
+                    if pendientes >= 10:
+                        # ROJO (con letras blancas y en negritas para que resalte)
+                        estilos[idx_pend] = 'background-color: #ff4d4d; color: white; font-weight: bold;' 
+                    elif 4 <= pendientes <= 9:
+                        # AMARILLO (letras negras y negritas)
+                        estilos[idx_pend] = 'background-color: #ffcc00; color: black; font-weight: bold;'
+                    elif 1 <= pendientes <= 3:
+                        # VERDE (letras blancas y negritas)
+                        estilos[idx_pend] = 'background-color: #00cc66; color: white; font-weight: bold;'
+                        
+                return estilos
             
-            df_estilizado = df_horarios.style.apply(colorear_filas, axis=1)
+            df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
             
             # Preparar Excel para descarga en web
             output = io.BytesIO()
             df_estilizado.to_excel(output, index=False, engine='openpyxl')
             
-            st.success("✅ ¡Semana completa generada al 100%!")
+            st.success("✅ ¡Semana y semáforo generados al 100%!")
             st.download_button(
                 label="📥 Descargar Excel de Horarios",
                 data=output.getvalue(),
-                file_name="Horarios_Semanales.xlsx",
+                file_name="Horarios_Semanales_Zorro.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
