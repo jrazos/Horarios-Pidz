@@ -3,19 +3,18 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import io
+# Importamos las herramientas de diseño nativas de Excel
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-# Configuración de la página web
 st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="centered")
 
 st.title("🦊 Generador de Horarios de Capacitación")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
-# Botón para subir archivo
 archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
 
 if archivo_subido is not None:
     try:
-        # 1. Cargar datos
         df = pd.read_excel(archivo_subido)
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
         df_pendientes = df[df['Progreso'].isin(['No iniciado', 'En proceso', 'No Inciado', '0%'])]
@@ -33,7 +32,7 @@ if archivo_subido is not None:
         total_colaboradores = len(cola_colaboradores)
 
         if total_colaboradores == 0:
-            st.success("✅ Todo el personal está al 100% en sus cursos. No se requieren horarios.")
+            st.success("✅ Todo el personal está al 100% en sus cursos.")
         else:
             indice_colaborador = 0
             tz_mx = pytz.timezone('America/Mexico_City')
@@ -46,7 +45,6 @@ if archivo_subido is not None:
             horarios = []
             dias_programados = 0
             
-            # Barra de carga visual en la web
             barra_progreso = st.progress(0, text="Generando la mejor combinación de horarios...")
             
             while dias_programados < 7:
@@ -82,65 +80,80 @@ if archivo_subido is not None:
                     
                 fecha_actual += timedelta(days=1)
                 dias_programados += 1
-                barra_progreso.progress(int((dias_programados/7)*100), text="Generando la mejor combinación de horarios...")
+                barra_progreso.progress(int((dias_programados/7)*100), text="Aplicando diseño y formatos...")
 
             df_horarios = pd.DataFrame(horarios)
             
-            # Función para aplicar estilos a las filas de datos
             def aplicar_estilos(row):
                 dia = row['Fecha y Horario'].split()[0]
                 colores_dia = {
-                    'lunes': 'background-color: #ffcccc', 
-                    'martes': 'background-color: #ccffcc', 
-                    'miércoles': 'background-color: #ffffcc', 
-                    'jueves': 'background-color: #ffe6cc', 
-                    'viernes': 'background-color: #cce5ff', 
-                    'sábado': 'background-color: #e6ccff', 
+                    'lunes': 'background-color: #ffcccc', 'martes': 'background-color: #ccffcc', 
+                    'miércoles': 'background-color: #ffffcc', 'jueves': 'background-color: #ffe6cc', 
+                    'viernes': 'background-color: #cce5ff', 'sábado': 'background-color: #e6ccff', 
                     'domingo': 'background-color: #e6e6e6'
                 }
-                
-                color_base = colores_dia.get(dia, '')
-                estilos = [color_base] * len(row)
+                estilos = [colores_dia.get(dia, '')] * len(row)
                 
                 if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
                     estilos = ['background-color: #d9d9d9'] * len(row)
                 else:
                     idx_pend = row.index.get_loc('Pendientes')
                     pendientes = int(row['Pendientes'])
-                    
                     if pendientes >= 10:
                         estilos[idx_pend] = 'background-color: #ff4d4d; color: white; font-weight: bold;' 
                     elif 4 <= pendientes <= 9:
                         estilos[idx_pend] = 'background-color: #ffcc00; color: black; font-weight: bold;'
                     elif 1 <= pendientes <= 3:
                         estilos[idx_pend] = 'background-color: #00cc66; color: white; font-weight: bold;'
-                        
                 return estilos
             
-            # 🎨 APLICAR ESTILOS: Filas de datos + ESTILO DE ENCABEZADOS (Títulos)
-            df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1).set_table_styles([
-                {
-                    'selector': 'th',
-                    'props': [
-                        ('font-weight', 'bold'),          # Títulos en Negrita
-                        ('background-color', '#404040'), # Fondo gris oscuro elegante
-                        ('color', 'white'),              # Texto blanco para contrastar
-                        ('text-align', 'center')         # Centrar los títulos
-                    ]
-                }
-            ])
+            df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
             
-            # Preparar Excel para descarga en web
+            # --- 🎨 PROCESO DE DISEÑO PROFESIONAL EN EXCEL ---
             output = io.BytesIO()
-            df_estilizado.to_excel(output, index=False, engine='openpyxl')
-            
-            st.success("✅ ¡Semana y semáforo generados al 100%!")
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_estilizado.to_excel(writer, index=False, sheet_name='Horarios')
+                workbook = writer.book
+                worksheet = writer.sheets['Horarios']
+                
+                # Definir estilos
+                header_fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid") # Azul corporativo oscuro
+                header_font = Font(color="FFFFFF", bold=True, size=12) # Blanco, negrita, tamaño 12
+                borde_delgado = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), 
+                                       top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
+                
+                # 1. Aplicar diseño a los títulos (Fila 1)
+                for cell in worksheet[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                    cell.border = borde_delgado
+
+                # 2. Aplicar bordes, alineación y anchos al resto de la tabla
+                for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column):
+                    for cell in row:
+                        cell.border = borde_delgado
+                        if cell.column == 4: # Columna de 'Cursos a avanzar'
+                            cell.alignment = Alignment(vertical="center", wrap_text=True)
+                        elif cell.column == 5: # Columna de 'Pendientes'
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+                        else:
+                            cell.alignment = Alignment(vertical="center")
+
+                # 3. Ancho de columnas para que no se vea aplastado
+                worksheet.column_dimensions['A'].width = 30  # Fecha y Horario
+                worksheet.column_dimensions['B'].width = 35  # Colaborador
+                worksheet.column_dimensions['C'].width = 25  # Puesto
+                worksheet.column_dimensions['D'].width = 45  # Cursos
+                worksheet.column_dimensions['E'].width = 15  # Pendientes
+
+            st.success("✅ ¡Formato Premium generado con éxito!")
             st.download_button(
-                label="📥 Descargar Excel de Horarios",
+                label="📥 Descargar Horario Premium",
                 data=output.getvalue(),
-                file_name="Horarios_Semanales_Zorro.xlsx",
+                file_name="Horarios_Semanales_Premium.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
-        st.error(f"❌ Hubo un problema con el archivo. Asegúrate de que tenga las 5 columnas exactas. Detalle técnico: {e}")
+        st.error(f"❌ Hubo un problema con el archivo. Detalle técnico: {e}")
