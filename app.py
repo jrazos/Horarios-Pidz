@@ -19,17 +19,12 @@ if archivo_subido is not None:
         df = pd.read_excel(archivo_subido)
         
         # --- LIMPIEZA DE DATOS ---
-        # Homologamos el texto: quitamos espacios extra y lo pasamos a minúsculas para evitar errores
         df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
         
-        # --- 📊 CÁLCULO DEL PORCENTAJE DE AVANCE DE LA SUCURSAL ---
+        # --- 📊 CÁLCULO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
-        
-        # 1. Solamente toma como concluidos los que dicen "finalizado"
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
-        
-        # 2. "en proceso" y "no iniciado" se toman como pendientes
         filtro_pendientes = df['Progreso_clean'].isin(['en proceso', 'no iniciado', 'no inciado'])
         
         if total_cursos > 0:
@@ -58,9 +53,7 @@ if archivo_subido is not None:
             Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
         ).reset_index()
         
-        # Top 10 Peor (los que tienen MÁS cursos pendientes)
         top_10_peor = stats.sort_values(by='Pendientes', ascending=False).head(10)
-        # Top 10 Mejor (los que tienen MENOS pendientes y MÁS finalizados)
         top_10_mejor = stats.sort_values(by=['Pendientes', 'Finalizados'], ascending=[True, False]).head(10)
 
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
@@ -138,7 +131,7 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
-            # --- 🎨 EXCEL CON TÍTULO Y GRÁFICAS ---
+            # --- 🎨 EXCEL: HORARIOS Y GRÁFICAS ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
@@ -164,11 +157,11 @@ if archivo_subido is not None:
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                     cell.border = borde
 
-                # 3. FORMATO GENERAL Y ALTO DE FILAS
+                # 3. FORMATO GENERAL
                 for row_idx in range(1, worksheet.max_row + 1):
                     worksheet.row_dimensions[row_idx].height = 30
                     if row_idx >= 5: 
-                        for cell in worksheet[row_idx][:5]: # Aplicar borde solo a columnas A hasta E
+                        for cell in worksheet[row_idx][:5]: 
                             cell.border = borde
                             cell.alignment = Alignment(vertical="center", wrap_text=True if cell.column == 4 else False)
 
@@ -179,48 +172,44 @@ if archivo_subido is not None:
                 worksheet.column_dimensions['D'].width = 45
                 worksheet.column_dimensions['E'].width = 15
 
-                # --- 📊 INYECTAR DATOS PARA GRÁFICAS ---
-                # Escribiremos los datos en columnas ocultas lejanas (Columna Z y AA)
-                col_nombres = 26 # Z
-                col_valores = 27 # AA
+                # --- 📊 SEGUNDA PESTAÑA: DATOS DE ESTADÍSTICAS ---
+                # Creamos una hoja aparte para no interferir con la principal
+                ws_datos = workbook.create_sheet(title="Estadísticas")
                 
-                # Escribir Top 10 Peor
+                # Top 10 Peor
                 fila_inicio_peor = 1
-                worksheet.cell(row=fila_inicio_peor, column=col_nombres, value="Colaborador")
-                worksheet.cell(row=fila_inicio_peor, column=col_valores, value="Pendientes")
+                ws_datos.cell(row=fila_inicio_peor, column=1, value="Colaborador")
+                ws_datos.cell(row=fila_inicio_peor, column=2, value="Pendientes")
                 for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=fila_inicio_peor + 1):
-                    worksheet.cell(row=i, column=col_nombres, value=fila['Nombre Completo'])
-                    worksheet.cell(row=i, column=col_valores, value=fila['Pendientes'])
+                    ws_datos.cell(row=i, column=1, value=fila['Nombre Completo'])
+                    ws_datos.cell(row=i, column=2, value=fila['Pendientes'])
                 fila_fin_peor = fila_inicio_peor + len(top_10_peor)
 
-                # Escribir Top 10 Mejor
+                # Top 10 Mejor
                 fila_inicio_mejor = 15
-                worksheet.cell(row=fila_inicio_mejor, column=col_nombres, value="Colaborador")
-                worksheet.cell(row=fila_inicio_mejor, column=col_valores, value="Pendientes")
+                ws_datos.cell(row=fila_inicio_mejor, column=1, value="Colaborador")
+                ws_datos.cell(row=fila_inicio_mejor, column=2, value="Pendientes")
                 for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=fila_inicio_mejor + 1):
-                    worksheet.cell(row=i, column=col_nombres, value=fila['Nombre Completo'])
-                    worksheet.cell(row=i, column=col_valores, value=fila['Pendientes'])
+                    ws_datos.cell(row=i, column=1, value=fila['Nombre Completo'])
+                    ws_datos.cell(row=i, column=2, value=fila['Pendientes'])
                 fila_fin_mejor = fila_inicio_mejor + len(top_10_mejor)
-
-                # Ocultamos estas columnas para que no ensucien el Excel
-                worksheet.column_dimensions['Z'].hidden = True
-                worksheet.column_dimensions['AA'].hidden = True
 
                 # --- 📈 DIBUJAR GRÁFICA: TOP 10 PEOR ---
                 grafica_peor = BarChart()
-                grafica_peor.type = "bar" # Barras horizontales (ideal para nombres largos)
+                grafica_peor.type = "bar" 
                 grafica_peor.style = 10 
                 grafica_peor.title = "⚠️ Top 10 - Mayor Rezago"
                 grafica_peor.x_axis.title = "Cursos Pendientes"
                 
-                datos_peor = Reference(worksheet, min_col=col_valores, min_row=fila_inicio_peor, max_row=fila_fin_peor)
-                cats_peor = Reference(worksheet, min_col=col_nombres, min_row=fila_inicio_peor+1, max_row=fila_fin_peor)
+                # Las gráficas ahora toman los datos de la hoja "Estadísticas"
+                datos_peor = Reference(ws_datos, min_col=2, min_row=fila_inicio_peor, max_row=fila_fin_peor)
+                cats_peor = Reference(ws_datos, min_col=1, min_row=fila_inicio_peor+1, max_row=fila_fin_peor)
                 grafica_peor.add_data(datos_peor, titles_from_data=True)
                 grafica_peor.set_categories(cats_peor)
                 grafica_peor.height = 10
                 grafica_peor.width = 18
                 
-                worksheet.add_chart(grafica_peor, "G4") # Pegar la gráfica en la celda G4
+                worksheet.add_chart(grafica_peor, "G4") 
 
                 # --- 📈 DIBUJAR GRÁFICA: TOP 10 MEJOR ---
                 grafica_mejor = BarChart()
@@ -229,14 +218,14 @@ if archivo_subido is not None:
                 grafica_mejor.title = "🌟 Top 10 - Mejores Avances"
                 grafica_mejor.x_axis.title = "Cursos Pendientes"
                 
-                datos_mejor = Reference(worksheet, min_col=col_valores, min_row=fila_inicio_mejor, max_row=fila_fin_mejor)
-                cats_mejor = Reference(worksheet, min_col=col_nombres, min_row=fila_inicio_mejor+1, max_row=fila_fin_mejor)
+                datos_mejor = Reference(ws_datos, min_col=2, min_row=fila_inicio_mejor, max_row=fila_fin_mejor)
+                cats_mejor = Reference(ws_datos, min_col=1, min_row=fila_inicio_mejor+1, max_row=fila_fin_mejor)
                 grafica_mejor.add_data(datos_mejor, titles_from_data=True)
                 grafica_mejor.set_categories(cats_mejor)
                 grafica_mejor.height = 10
                 grafica_mejor.width = 18
                 
-                worksheet.add_chart(grafica_mejor, "G22") # Pegar la gráfica más abajo (celda G22)
+                worksheet.add_chart(grafica_mejor, "G22")
 
             st.success("✅ ¡Horario con Título de Avance y Gráficas generado!")
             st.download_button(label="📥 Descargar Horario con Avance y Gráficas", data=output.getvalue(), file_name="Horarios_Zorro_Graficas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
