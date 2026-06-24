@@ -20,16 +20,15 @@ if archivo_subido is not None:
         df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
         
-        # REGLA: Convertir "en proceso" y errores de dedo a "no iniciado" para que valgan exactamente lo mismo
+        # Guardamos el estatus original limpio para mostrarlo en el texto
+        df['Estatus_Original'] = df['Progreso'].astype(str).str.strip()
+        
+        # REGLA: Convertir internamente "en proceso" y errores a "no iniciado" para los cálculos matemáticos
         df['Progreso_clean'] = df['Progreso_clean'].replace(['en proceso', 'no inciado', '0%'], 'no iniciado')
         
         # --- 📊 CÁLCULO ESTRICTO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
-        
-        # Regla 1: Solo "finalizado" cuenta como concluido.
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
-        
-        # Regla 2: Todo lo que diga "no iniciado" (que ahora incluye a los "en proceso") es pendiente
         filtro_pendientes = df['Progreso_clean'] == 'no iniciado'
         
         if total_cursos > 0:
@@ -52,22 +51,24 @@ if archivo_subido is not None:
         
         st.divider()
 
-        # --- ESTADÍSTICAS PARA EL TOP 10 (Suma estricta) ---
+        # --- ESTADÍSTICAS PARA EL TOP 10 ---
         stats = df.groupby('Nombre Completo').agg(
             Pendientes=('Progreso_clean', lambda x: (x == 'no iniciado').sum()),
             Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
         ).reset_index()
         
-        # Ordenamos
         top_10_peor = stats.sort_values(by='Pendientes', ascending=False).head(10)
         top_10_mejor = stats.sort_values(by=['Pendientes', 'Finalizados'], ascending=[True, False]).head(10)
 
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
-        df_pendientes = df[filtro_pendientes]
+        df_pendientes = df[filtro_pendientes].copy()
+        
+        # Unimos el nombre del curso con su estatus original en paréntesis
+        df_pendientes['Curso_Detalle'] = df_pendientes['Nombre curso'].astype(str) + " (" + df_pendientes['Estatus_Original'] + ")"
         
         resumen = df_pendientes.groupby(['Nombre Completo', 'Puesto']).agg(
-            Total_Pendientes=('Nombre curso', 'count'),
-            Nombres_Cursos=('Nombre curso', lambda x: ', '.join(x.astype(str)))
+            Total_Pendientes=('Curso_Detalle', 'count'),
+            Nombres_Cursos=('Curso_Detalle', lambda x: ', '.join(x))
         ).reset_index()
 
         resumen = resumen.sort_values(by='Total_Pendientes', ascending=False)
@@ -102,15 +103,17 @@ if archivo_subido is not None:
                 while hora_actual < hora_limite:
                     hora_fin = hora_actual + timedelta(minutes=30)
                     if hora_actual >= inicio_bloqueo and hora_actual < fin_bloqueo:
-                        horarios.append({'Fecha y Horario': f"{fecha_texto} de {inicio_bloqueo.strftime('%H:%M')} a {fin_bloqueo.strftime('%H:%M')}", 'Colaborador': '⚠️ RECESO / OPERACIÓN', 'Puesto': '---', 'Cursos a avanzar': 'Espacio reservado para operación', 'Pendientes': 0})
+                        horarios.append({'Fecha y Horario': f"{fecha_texto} de {inicio_bloqueo.strftime('%H:%M')} a {fin_bloqueo.strftime('%H:%M')}", 'Colaborador': '⚠️ RECESO / OPERACIÓN', 'Puesto': '---', 'Cursos Pendientes (Detalle)': 'Espacio reservado para operación', 'Total': 0})
                         hora_actual = fin_bloqueo
                         continue 
                     
                     colaborador = cola_colaboradores[indice_colaborador]
                     horarios.append({
                         'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
-                        'Colaborador': colaborador['Nombre Completo'], 'Puesto': colaborador['Puesto'],
-                        'Cursos a avanzar': colaborador['Nombres_Cursos'], 'Pendientes': colaborador['Total_Pendientes']
+                        'Colaborador': colaborador['Nombre Completo'], 
+                        'Puesto': colaborador['Puesto'],
+                        'Cursos Pendientes (Detalle)': colaborador['Nombres_Cursos'], 
+                        'Total': colaborador['Total_Pendientes']
                     })
                     hora_actual = hora_fin
                     indice_colaborador = (indice_colaborador + 1) % total_colaboradores 
@@ -127,8 +130,8 @@ if archivo_subido is not None:
                 if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
                     estilos = ['background-color: #d9d9d9'] * len(row)
                 else:
-                    idx_pend = row.index.get_loc('Pendientes')
-                    pendientes = int(row['Pendientes'])
+                    idx_pend = row.index.get_loc('Total')
+                    pendientes = int(row['Total'])
                     if pendientes >= 10: estilos[idx_pend] = 'background-color: #ff4d4d; color: white; font-weight: bold;' 
                     elif 4 <= pendientes <= 9: estilos[idx_pend] = 'background-color: #ffcc00; color: black; font-weight: bold;'
                     elif 1 <= pendientes <= 3: estilos[idx_pend] = 'background-color: #00cc66; color: white; font-weight: bold;'
@@ -136,7 +139,7 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
-            # --- 🎨 EXCEL CON LISTAS TOP 10 ---
+            # --- 🎨 EXCEL CON LISTAS TOP 10 Y NUEVO DETALLE ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
@@ -230,7 +233,7 @@ if archivo_subido is not None:
                 for r in range(4, 29):
                     worksheet.row_dimensions[r].height = 30
 
-            st.success("✅ ¡Horario generado con reglas estrictas de progreso!")
+            st.success("✅ ¡Horario generado con detalle de estatus por curso!")
             st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Listas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
