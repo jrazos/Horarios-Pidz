@@ -16,20 +16,20 @@ if archivo_subido is not None:
     try:
         df = pd.read_excel(archivo_subido)
         
-        # --- LIMPIEZA DE DATOS Y REGLA ESTRICTA ---
+        # --- LIMPIEZA DE DATOS ---
         df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
-        
-        # Guardamos el estatus original limpio para mostrarlo en el texto
         df['Estatus_Original'] = df['Progreso'].astype(str).str.strip()
         
-        # REGLA: Convertir internamente "en proceso" y errores a "no iniciado" para los cálculos matemáticos
-        df['Progreso_clean'] = df['Progreso_clean'].replace(['en proceso', 'no inciado', '0%'], 'no iniciado')
+        # 🚨 SOLUCIÓN AL ERROR: Lista exhaustiva de todos los términos que significan pendiente
+        terminos_pendientes = ['no iniciado', 'no inciado', 'en proceso', 'en progreso', '0%']
         
         # --- 📊 CÁLCULO ESTRICTO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
-        filtro_pendientes = df['Progreso_clean'] == 'no iniciado'
+        
+        # Aplicamos la nueva lista robusta para encontrar a los pendientes
+        filtro_pendientes = df['Progreso_clean'].isin(terminos_pendientes)
         
         if total_cursos > 0:
             porcentaje_avance = (cursos_finalizados / total_cursos) * 100
@@ -53,7 +53,7 @@ if archivo_subido is not None:
 
         # --- ESTADÍSTICAS PARA EL TOP 10 ---
         stats = df.groupby('Nombre Completo').agg(
-            Pendientes=('Progreso_clean', lambda x: (x == 'no iniciado').sum()),
+            Pendientes=('Progreso_clean', lambda x: x.isin(terminos_pendientes).sum()),
             Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
         ).reset_index()
         
@@ -63,7 +63,7 @@ if archivo_subido is not None:
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
         df_pendientes = df[filtro_pendientes].copy()
         
-        # Unimos el nombre del curso con su estatus original en paréntesis
+        # Unimos el nombre del curso con su estatus original
         df_pendientes['Curso_Detalle'] = df_pendientes['Nombre curso'].astype(str) + " (" + df_pendientes['Estatus_Original'] + ")"
         
         resumen = df_pendientes.groupby(['Nombre Completo', 'Puesto']).agg(
@@ -233,7 +233,7 @@ if archivo_subido is not None:
                 for r in range(4, 29):
                     worksheet.row_dimensions[r].height = 30
 
-            st.success("✅ ¡Horario generado con detalle de estatus por curso!")
+            st.success("✅ ¡Horario generado con regla corregida para sumar pendientes!")
             st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Listas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
