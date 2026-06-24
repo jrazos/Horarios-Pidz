@@ -3,10 +3,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import io
-# Importamos las herramientas de diseño nativas de Excel
+# Importamos las herramientas de diseño y GRÁFICAS nativas de Excel
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import BarChart, Reference
 
-st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="centered")
+st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="wide")
 
 st.title("🦊 Generador de Horarios de Capacitación")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
@@ -17,9 +18,19 @@ if archivo_subido is not None:
     try:
         df = pd.read_excel(archivo_subido)
         
+        # --- LIMPIEZA DE DATOS ---
+        # Homologamos el texto: quitamos espacios extra y lo pasamos a minúsculas para evitar errores
+        df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
+        df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
+        
         # --- 📊 CÁLCULO DEL PORCENTAJE DE AVANCE DE LA SUCURSAL ---
         total_cursos = len(df)
-        cursos_finalizados = len(df[df['Progreso'].astype(str).str.strip().isin(['Finalizado', 'finalizado', '100%'])])
+        
+        # 1. Solamente toma como concluidos los que dicen "finalizado"
+        cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
+        
+        # 2. "en proceso" y "no iniciado" se toman como pendientes
+        filtro_pendientes = df['Progreso_clean'].isin(['en proceso', 'no iniciado', 'no inciado'])
         
         if total_cursos > 0:
             porcentaje_avance = (cursos_finalizados / total_cursos) * 100
@@ -28,25 +39,32 @@ if archivo_subido is not None:
 
         st.subheader("📈 Estado de Capacitación de la Sucursal")
         
-        # Definimos color y mensaje para la web y el excel
         color_hex = ""
-        mensaje_web = ""
-        
         if porcentaje_avance >= 85:
-            color_hex = "00cc66" # Verde
+            color_hex = "00cc66" 
             st.success(f"¡Excelente ritmo! Avance: **{porcentaje_avance:.1f}%**")
         elif 50 <= porcentaje_avance < 85:
-            color_hex = "ffcc00" # Amarillo
+            color_hex = "ffcc00" 
             st.warning(f"Buen esfuerzo. Avance: **{porcentaje_avance:.1f}%**")
         else:
-            color_hex = "ff4d4d" # Rojo
+            color_hex = "ff4d4d" 
             st.error(f"Atención requerida. Avance: **{porcentaje_avance:.1f}%**")
         
         st.divider()
 
+        # --- ESTADÍSTICAS PARA LAS GRÁFICAS (TOP 10) ---
+        stats = df.groupby('Nombre Completo').agg(
+            Pendientes=('Progreso_clean', lambda x: x.isin(['en proceso', 'no iniciado', 'no inciado']).sum()),
+            Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
+        ).reset_index()
+        
+        # Top 10 Peor (los que tienen MÁS cursos pendientes)
+        top_10_peor = stats.sort_values(by='Pendientes', ascending=False).head(10)
+        # Top 10 Mejor (los que tienen MENOS pendientes y MÁS finalizados)
+        top_10_mejor = stats.sort_values(by=['Pendientes', 'Finalizados'], ascending=[True, False]).head(10)
+
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
-        df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
-        df_pendientes = df[df['Progreso'].astype(str).str.strip().isin(['No iniciado', 'En proceso', 'No Inciado', '0%'])]
+        df_pendientes = df[filtro_pendientes]
         
         resumen = df_pendientes.groupby(['Nombre Completo', 'Puesto']).agg(
             Total_Pendientes=('Nombre curso', 'count'),
@@ -120,53 +138,19 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
-            # --- 🎨 EXCEL CON TÍTULO DE AVANCE ---
+            # --- 🎨 EXCEL CON TÍTULO Y GRÁFICAS ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Escribimos los datos empezando en la fila 4 (dejamos 3 libres arriba)
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
-                
                 workbook = writer.book
                 worksheet = writer.sheets['Horarios']
                 
-                # 1. 🏆 CREAR EL TÍTULO DE AVANCE PRINCIPAL
-                worksheet.merge_cells('A1:E2') # Combinar las celdas de arriba
+                # 1. TÍTULO DE AVANCE PRINCIPAL
+                worksheet.merge_cells('A1:E2')
                 celda_titulo = worksheet['A1']
                 celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | AVANCE DE SUCURSAL: {porcentaje_avance:.1f}%"
-                
-                # Estilo del Título Principal
                 celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=16)
                 celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
                 celda_titulo.alignment = Alignment(horizontal="center", vertical="center")
 
-                # 2. DISEÑO DE ENCABEZADOS DE TABLA (Fila 4)
-                header_fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True, size=12)
-                borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
-
-                for cell in worksheet[4]:
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                    cell.border = borde
-
-                # 3. FORMATO GENERAL Y ALTO DE FILAS
-                for row_idx in range(1, worksheet.max_row + 1):
-                    worksheet.row_dimensions[row_idx].height = 30
-                    if row_idx >= 5: # Celdas de datos
-                        for cell in worksheet[row_idx]:
-                            cell.border = borde
-                            cell.alignment = Alignment(vertical="center", wrap_text=True if cell.column == 4 else False)
-
-                # Ancho de columnas
-                worksheet.column_dimensions['A'].width = 30
-                worksheet.column_dimensions['B'].width = 35
-                worksheet.column_dimensions['C'].width = 25
-                worksheet.column_dimensions['D'].width = 45
-                worksheet.column_dimensions['E'].width = 15
-
-            st.success("✅ ¡Horario con Título de Avance generado!")
-            st.download_button(label="📥 Descargar Horario con Avance", data=output.getvalue(), file_name="Horarios_Zorro_Con_Avance.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    except Exception as e:
-        st.error(f"❌ Error técnico: {e}")
+                # 2. DISEÑO DE ENCABEZADOS
