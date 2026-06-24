@@ -16,8 +16,35 @@ archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre 
 if archivo_subido is not None:
     try:
         df = pd.read_excel(archivo_subido)
+        
+        # --- 📊 CÁLCULO DEL PORCENTAJE DE AVANCE DE LA SUCURSAL ---
+        total_cursos = len(df)
+        # Contamos cuántos están finalizados (limpiando espacios por si acaso)
+        cursos_finalizados = len(df[df['Progreso'].astype(str).str.strip().isin(['Finalizado', 'finalizado', '100%'])])
+        
+        if total_cursos > 0:
+            porcentaje_avance = (cursos_finalizados / total_cursos) * 100
+        else:
+            porcentaje_avance = 0.0
+
+        # Mostrar métrica visual en la página web
+        st.subheader("📈 Estado de Capacitación de la Sucursal")
+        
+        # Color del indicador dependiendo del avance
+        if porcentaje_avance >= 85:
+            st.success(f"¡Excelente ritmo! La sucursal tiene un **{porcentaje_avance:.1f}%** de avance total ({cursos_finalizados} de {total_cursos} cursos completados).")
+        elif 50 <= porcentaje_avance < 85:
+            st.warning(f"Buen esfuerzo. La sucursal tiene un **{porcentaje_avance:.1f}%** de avance total ({cursos_finalizados} de {total_cursos} cursos completados). ¡A seguir impulsando!")
+        else:
+            st.error(f"Atención requerida. La sucursal tiene un **{porcentaje_avance:.1f}%** de avance total ({cursos_finalizados} de {total_cursos} cursos completados). Este horario ayudará a subir el indicador.")
+        
+        st.divider() # Línea divisoria visual
+
+        # --- CONTINUACIÓN DEL PROCESO DE HORARIOS ---
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
-        df_pendientes = df[df['Progreso'].isin(['No iniciado', 'En proceso', 'No Inciado', '0%'])]
+        
+        # Consideramos pendientes los que están "No iniciado", "En proceso" o variantes comunes
+        df_pendientes = df[df['Progreso'].astype(str).str.strip().isin(['No iniciado', 'En proceso', 'No Inciado', '0%'])]
         
         resumen = df_pendientes.groupby(['Nombre Completo', 'Puesto']).agg(
             Total_Pendientes=('Nombre curso', 'count'),
@@ -32,7 +59,7 @@ if archivo_subido is not None:
         total_colaboradores = len(cola_colaboradores)
 
         if total_colaboradores == 0:
-            st.success("✅ Todo el personal está al 100% en sus cursos.")
+            st.success("🎉 ¡Felicidades! Todo el personal está al 100% en sus cursos. No se requieren horarios semanales.")
         else:
             indice_colaborador = 0
             tz_mx = pytz.timezone('America/Mexico_City')
@@ -146,7 +173,7 @@ if archivo_subido is not None:
                 worksheet.column_dimensions['D'].width = 45  
                 worksheet.column_dimensions['E'].width = 15  
 
-                # 4. ALTO DE FILAS A 30 PUNTOS (Toda la tabla)
+                # 4. Alto de filas a 30 puntos
                 for row_idx in range(1, worksheet.max_row + 1):
                     worksheet.row_dimensions[row_idx].height = 30
 
@@ -159,4 +186,4 @@ if archivo_subido is not None:
             )
 
     except Exception as e:
-        st.error(f"❌ Hubo un problema con el archivo. Detalle técnico: {e}")
+        st.error(f"❌ Hubo un problema con el archivo. Asegúrate de que la columna se llame 'Progreso' y tenga los estatus correctos. Detalle técnico: {e}")
