@@ -3,9 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import io
-# Importamos las herramientas de diseño y GRÁFICAS nativas de Excel
+# Importamos las herramientas de diseño nativas de Excel (Eliminamos las gráficas)
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import BarChart, Reference
 
 st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="wide")
 
@@ -22,10 +21,14 @@ if archivo_subido is not None:
         df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
         
-        # --- 📊 CÁLCULO DEL PORCENTAJE DE AVANCE ---
+        # --- 📊 CÁLCULO ESTRICTO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
+        
+        # Regla 1: Solo "finalizado" cuenta como concluido.
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
-        filtro_pendientes = df['Progreso_clean'].isin(['en proceso', 'no iniciado', 'no inciado'])
+        
+        # Regla 2: "en proceso", "no iniciado" (y errores de dedo como "no inciado" o "0%") son pendientes.
+        filtro_pendientes = df['Progreso_clean'].isin(['en proceso', 'no iniciado', 'no inciado', '0%'])
         
         if total_cursos > 0:
             porcentaje_avance = (cursos_finalizados / total_cursos) * 100
@@ -47,13 +50,15 @@ if archivo_subido is not None:
         
         st.divider()
 
-        # --- ESTADÍSTICAS PARA LAS GRÁFICAS (TOP 10) ---
+        # --- ESTADÍSTICAS PARA EL TOP 10 (Reglas estrictas) ---
         stats = df.groupby('Nombre Completo').agg(
-            Pendientes=('Progreso_clean', lambda x: x.isin(['en proceso', 'no iniciado', 'no inciado']).sum()),
+            Pendientes=('Progreso_clean', lambda x: x.isin(['en proceso', 'no iniciado', 'no inciado', '0%']).sum()),
             Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
         ).reset_index()
         
+        # Ordenamos
         top_10_peor = stats.sort_values(by='Pendientes', ascending=False).head(10)
+        # El mejor aprovechamiento son los que tienen MENOS pendientes y MÁS finalizados
         top_10_mejor = stats.sort_values(by=['Pendientes', 'Finalizados'], ascending=[True, False]).head(10)
 
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
@@ -131,13 +136,17 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
-            # --- 🎨 EXCEL: HORARIOS Y GRÁFICAS ---
+            # --- 🎨 EXCEL CON LISTAS TOP 10 A LA DERECHA ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Escribimos los horarios
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
                 workbook = writer.book
                 worksheet = writer.sheets['Horarios']
                 
+                # Borde estándar para todo el documento
+                borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
+
                 # 1. TÍTULO DE AVANCE PRINCIPAL
                 worksheet.merge_cells('A1:E2')
                 celda_titulo = worksheet['A1']
@@ -145,19 +154,22 @@ if archivo_subido is not None:
                 celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=16)
                 celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
                 celda_titulo.alignment = Alignment(horizontal="center", vertical="center")
+                
+                # Aplicar borde al titulo combinado
+                for row_t in range(1, 3):
+                    for col_t in range(1, 6):
+                        worksheet.cell(row=row_t, column=col_t).border = borde
 
-                # 2. DISEÑO DE ENCABEZADOS
+                # 2. DISEÑO DE ENCABEZADOS DE HORARIOS
                 header_fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True, size=12)
-                borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
-
-                for cell in worksheet[4]:
+                for cell in worksheet[4][:5]: # Solo columnas A-E
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                     cell.border = borde
 
-                # 3. FORMATO GENERAL
+                # 3. FORMATO GENERAL DE HORARIOS
                 for row_idx in range(1, worksheet.max_row + 1):
                     worksheet.row_dimensions[row_idx].height = 30
                     if row_idx >= 5: 
@@ -165,70 +177,74 @@ if archivo_subido is not None:
                             cell.border = borde
                             cell.alignment = Alignment(vertical="center", wrap_text=True if cell.column == 4 else False)
 
-                # Anchos
+                # Anchos principales
                 worksheet.column_dimensions['A'].width = 30
                 worksheet.column_dimensions['B'].width = 35
                 worksheet.column_dimensions['C'].width = 25
                 worksheet.column_dimensions['D'].width = 45
                 worksheet.column_dimensions['E'].width = 15
-
-                # --- 📊 SEGUNDA PESTAÑA: DATOS DE ESTADÍSTICAS ---
-                # Creamos una hoja aparte para no interferir con la principal
-                ws_datos = workbook.create_sheet(title="Estadísticas")
                 
-                # Top 10 Peor
-                fila_inicio_peor = 1
-                ws_datos.cell(row=fila_inicio_peor, column=1, value="Colaborador")
-                ws_datos.cell(row=fila_inicio_peor, column=2, value="Pendientes")
-                for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=fila_inicio_peor + 1):
-                    ws_datos.cell(row=i, column=1, value=fila['Nombre Completo'])
-                    ws_datos.cell(row=i, column=2, value=fila['Pendientes'])
-                fila_fin_peor = fila_inicio_peor + len(top_10_peor)
-
-                # Top 10 Mejor
-                fila_inicio_mejor = 15
-                ws_datos.cell(row=fila_inicio_mejor, column=1, value="Colaborador")
-                ws_datos.cell(row=fila_inicio_mejor, column=2, value="Pendientes")
-                for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=fila_inicio_mejor + 1):
-                    ws_datos.cell(row=i, column=1, value=fila['Nombre Completo'])
-                    ws_datos.cell(row=i, column=2, value=fila['Pendientes'])
-                fila_fin_mejor = fila_inicio_mejor + len(top_10_mejor)
-
-                # --- 📈 DIBUJAR GRÁFICA: TOP 10 PEOR ---
-                grafica_peor = BarChart()
-                grafica_peor.type = "bar" 
-                grafica_peor.style = 10 
-                grafica_peor.title = "⚠️ Top 10 - Mayor Rezago"
-                grafica_peor.x_axis.title = "Cursos Pendientes"
+                # --- 🥇 DIBUJAR LISTAS TOP 10 A LA DERECHA ---
+                # Usaremos la columna F como espacio (separador), y la G y H para las listas.
+                worksheet.column_dimensions['F'].width = 3
+                worksheet.column_dimensions['G'].width = 35
+                worksheet.column_dimensions['H'].width = 25
                 
-                # Las gráficas ahora toman los datos de la hoja "Estadísticas"
-                datos_peor = Reference(ws_datos, min_col=2, min_row=fila_inicio_peor, max_row=fila_fin_peor)
-                cats_peor = Reference(ws_datos, min_col=1, min_row=fila_inicio_peor+1, max_row=fila_fin_peor)
-                grafica_peor.add_data(datos_peor, titles_from_data=True)
-                grafica_peor.set_categories(cats_peor)
-                grafica_peor.height = 10
-                grafica_peor.width = 18
+                # 🔴 LISTA 1: TOP 10 MAYOR REZAGO
+                worksheet.merge_cells('G4:H4')
+                titulo_peor = worksheet['G4']
+                titulo_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
+                titulo_peor.fill = PatternFill(start_color="ff4d4d", end_color="ff4d4d", fill_type="solid") # Rojo
+                titulo_peor.font = Font(color="FFFFFF", bold=True)
+                titulo_peor.alignment = Alignment(horizontal="center", vertical="center")
+                worksheet.cell(row=4, column=7).border = borde
+                worksheet.cell(row=4, column=8).border = borde
                 
-                worksheet.add_chart(grafica_peor, "G4") 
+                fill_lista_peor = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Fondo rojo claro
+                font_lista_peor = Font(color="9C0006") # Letra roja oscura
+                
+                for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=5):
+                    celda_nombre = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
+                    celda_cursos = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
+                    
+                    for cell in [celda_nombre, celda_cursos]:
+                        cell.fill = fill_lista_peor
+                        cell.font = font_lista_peor
+                        cell.border = borde
+                        cell.alignment = Alignment(vertical="center")
+                    celda_cursos.alignment = Alignment(horizontal="center", vertical="center")
 
-                # --- 📈 DIBUJAR GRÁFICA: TOP 10 MEJOR ---
-                grafica_mejor = BarChart()
-                grafica_mejor.type = "bar"
-                grafica_mejor.style = 13
-                grafica_mejor.title = "🌟 Top 10 - Mejores Avances"
-                grafica_mejor.x_axis.title = "Cursos Pendientes"
+                # 🟢 LISTA 2: TOP 10 MEJOR APROVECHAMIENTO
+                # Dejamos un espacio y empezamos en la fila 18
+                worksheet.merge_cells('G18:H18')
+                titulo_mejor = worksheet['G18']
+                titulo_mejor.value = "🌟 TOP 10 - MEJOR APROVECHAMIENTO"
+                titulo_mejor.fill = PatternFill(start_color="00cc66", end_color="00cc66", fill_type="solid") # Verde
+                titulo_mejor.font = Font(color="FFFFFF", bold=True)
+                titulo_mejor.alignment = Alignment(horizontal="center", vertical="center")
+                worksheet.cell(row=18, column=7).border = borde
+                worksheet.cell(row=18, column=8).border = borde
                 
-                datos_mejor = Reference(ws_datos, min_col=2, min_row=fila_inicio_mejor, max_row=fila_fin_mejor)
-                cats_mejor = Reference(ws_datos, min_col=1, min_row=fila_inicio_mejor+1, max_row=fila_fin_mejor)
-                grafica_mejor.add_data(datos_mejor, titles_from_data=True)
-                grafica_mejor.set_categories(cats_mejor)
-                grafica_mejor.height = 10
-                grafica_mejor.width = 18
+                fill_lista_mejor = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") # Fondo verde claro
+                font_lista_mejor = Font(color="006100") # Letra verde oscura
                 
-                worksheet.add_chart(grafica_mejor, "G22")
+                for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=19):
+                    celda_nombre = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
+                    celda_cursos = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
+                    
+                    for cell in [celda_nombre, celda_cursos]:
+                        cell.fill = fill_lista_mejor
+                        cell.font = font_lista_mejor
+                        cell.border = borde
+                        cell.alignment = Alignment(vertical="center")
+                    celda_cursos.alignment = Alignment(horizontal="center", vertical="center")
+                    
+                # Asegurar que todas las filas del Top 10 tengan el alto correcto (30px)
+                for r in range(4, 29):
+                    worksheet.row_dimensions[r].height = 30
 
-            st.success("✅ ¡Horario con Título de Avance y Gráficas generado!")
-            st.download_button(label="📥 Descargar Horario con Avance y Gráficas", data=output.getvalue(), file_name="Horarios_Zorro_Graficas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.success("✅ ¡Horario con Listas de Top 10 generado!")
+            st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Listas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
         st.error(f"❌ Error técnico: {e}")
