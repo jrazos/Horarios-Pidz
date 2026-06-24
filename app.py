@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import io
-# Importamos las herramientas de diseño nativas de Excel (Eliminamos las gráficas)
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="wide")
@@ -17,9 +16,12 @@ if archivo_subido is not None:
     try:
         df = pd.read_excel(archivo_subido)
         
-        # --- LIMPIEZA DE DATOS ---
+        # --- LIMPIEZA DE DATOS Y REGLA ESTRICTA ---
         df['Progreso_clean'] = df['Progreso'].astype(str).str.strip().str.lower()
         df['Nombre Completo'] = df['Nombre(s)'].astype(str) + ' ' + df['Apellido(s)'].astype(str)
+        
+        # REGLA: Convertir "en proceso" y errores de dedo a "no iniciado" para que valgan exactamente lo mismo
+        df['Progreso_clean'] = df['Progreso_clean'].replace(['en proceso', 'no inciado', '0%'], 'no iniciado')
         
         # --- 📊 CÁLCULO ESTRICTO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
@@ -27,8 +29,8 @@ if archivo_subido is not None:
         # Regla 1: Solo "finalizado" cuenta como concluido.
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
         
-        # Regla 2: "en proceso", "no iniciado" (y errores de dedo como "no inciado" o "0%") son pendientes.
-        filtro_pendientes = df['Progreso_clean'].isin(['en proceso', 'no iniciado', 'no inciado', '0%'])
+        # Regla 2: Todo lo que diga "no iniciado" (que ahora incluye a los "en proceso") es pendiente
+        filtro_pendientes = df['Progreso_clean'] == 'no iniciado'
         
         if total_cursos > 0:
             porcentaje_avance = (cursos_finalizados / total_cursos) * 100
@@ -50,15 +52,14 @@ if archivo_subido is not None:
         
         st.divider()
 
-        # --- ESTADÍSTICAS PARA EL TOP 10 (Reglas estrictas) ---
+        # --- ESTADÍSTICAS PARA EL TOP 10 (Suma estricta) ---
         stats = df.groupby('Nombre Completo').agg(
-            Pendientes=('Progreso_clean', lambda x: x.isin(['en proceso', 'no iniciado', 'no inciado', '0%']).sum()),
+            Pendientes=('Progreso_clean', lambda x: (x == 'no iniciado').sum()),
             Finalizados=('Progreso_clean', lambda x: (x == 'finalizado').sum())
         ).reset_index()
         
         # Ordenamos
         top_10_peor = stats.sort_values(by='Pendientes', ascending=False).head(10)
-        # El mejor aprovechamiento son los que tienen MENOS pendientes y MÁS finalizados
         top_10_mejor = stats.sort_values(by=['Pendientes', 'Finalizados'], ascending=[True, False]).head(10)
 
         # --- GENERACIÓN DE LA LÓGICA DE HORARIOS ---
@@ -119,7 +120,6 @@ if archivo_subido is not None:
 
             df_horarios = pd.DataFrame(horarios)
             
-            # Estilos de filas
             def aplicar_estilos(row):
                 dia = row['Fecha y Horario'].split()[0]
                 colores_dia = {'lunes': 'background-color: #ffcccc', 'martes': 'background-color: #ccffcc', 'miércoles': 'background-color: #ffffcc', 'jueves': 'background-color: #ffe6cc', 'viernes': 'background-color: #cce5ff', 'sábado': 'background-color: #e6ccff', 'domingo': 'background-color: #e6e6e6'}
@@ -136,18 +136,15 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
-            # --- 🎨 EXCEL CON LISTAS TOP 10 A LA DERECHA ---
+            # --- 🎨 EXCEL CON LISTAS TOP 10 ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Escribimos los horarios
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
                 workbook = writer.book
                 worksheet = writer.sheets['Horarios']
                 
-                # Borde estándar para todo el documento
                 borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
 
-                # 1. TÍTULO DE AVANCE PRINCIPAL
                 worksheet.merge_cells('A1:E2')
                 celda_titulo = worksheet['A1']
                 celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | AVANCE DE SUCURSAL: {porcentaje_avance:.1f}%"
@@ -155,21 +152,18 @@ if archivo_subido is not None:
                 celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
                 celda_titulo.alignment = Alignment(horizontal="center", vertical="center")
                 
-                # Aplicar borde al titulo combinado
                 for row_t in range(1, 3):
                     for col_t in range(1, 6):
                         worksheet.cell(row=row_t, column=col_t).border = borde
 
-                # 2. DISEÑO DE ENCABEZADOS DE HORARIOS
                 header_fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True, size=12)
-                for cell in worksheet[4][:5]: # Solo columnas A-E
+                for cell in worksheet[4][:5]: 
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                     cell.border = borde
 
-                # 3. FORMATO GENERAL DE HORARIOS
                 for row_idx in range(1, worksheet.max_row + 1):
                     worksheet.row_dimensions[row_idx].height = 30
                     if row_idx >= 5: 
@@ -177,36 +171,32 @@ if archivo_subido is not None:
                             cell.border = borde
                             cell.alignment = Alignment(vertical="center", wrap_text=True if cell.column == 4 else False)
 
-                # Anchos principales
                 worksheet.column_dimensions['A'].width = 30
                 worksheet.column_dimensions['B'].width = 35
                 worksheet.column_dimensions['C'].width = 25
                 worksheet.column_dimensions['D'].width = 45
                 worksheet.column_dimensions['E'].width = 15
                 
-                # --- 🥇 DIBUJAR LISTAS TOP 10 A LA DERECHA ---
-                # Usaremos la columna F como espacio (separador), y la G y H para las listas.
                 worksheet.column_dimensions['F'].width = 3
                 worksheet.column_dimensions['G'].width = 35
                 worksheet.column_dimensions['H'].width = 25
                 
-                # 🔴 LISTA 1: TOP 10 MAYOR REZAGO
+                # 🔴 TOP 10 MAYOR REZAGO
                 worksheet.merge_cells('G4:H4')
                 titulo_peor = worksheet['G4']
                 titulo_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
-                titulo_peor.fill = PatternFill(start_color="ff4d4d", end_color="ff4d4d", fill_type="solid") # Rojo
+                titulo_peor.fill = PatternFill(start_color="ff4d4d", end_color="ff4d4d", fill_type="solid")
                 titulo_peor.font = Font(color="FFFFFF", bold=True)
                 titulo_peor.alignment = Alignment(horizontal="center", vertical="center")
                 worksheet.cell(row=4, column=7).border = borde
                 worksheet.cell(row=4, column=8).border = borde
                 
-                fill_lista_peor = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Fondo rojo claro
-                font_lista_peor = Font(color="9C0006") # Letra roja oscura
+                fill_lista_peor = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
+                font_lista_peor = Font(color="9C0006") 
                 
                 for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=5):
                     celda_nombre = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
                     celda_cursos = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
-                    
                     for cell in [celda_nombre, celda_cursos]:
                         cell.fill = fill_lista_peor
                         cell.font = font_lista_peor
@@ -214,24 +204,22 @@ if archivo_subido is not None:
                         cell.alignment = Alignment(vertical="center")
                     celda_cursos.alignment = Alignment(horizontal="center", vertical="center")
 
-                # 🟢 LISTA 2: TOP 10 MEJOR APROVECHAMIENTO
-                # Dejamos un espacio y empezamos en la fila 18
+                # 🟢 TOP 10 MEJOR APROVECHAMIENTO
                 worksheet.merge_cells('G18:H18')
                 titulo_mejor = worksheet['G18']
                 titulo_mejor.value = "🌟 TOP 10 - MEJOR APROVECHAMIENTO"
-                titulo_mejor.fill = PatternFill(start_color="00cc66", end_color="00cc66", fill_type="solid") # Verde
+                titulo_mejor.fill = PatternFill(start_color="00cc66", end_color="00cc66", fill_type="solid")
                 titulo_mejor.font = Font(color="FFFFFF", bold=True)
                 titulo_mejor.alignment = Alignment(horizontal="center", vertical="center")
                 worksheet.cell(row=18, column=7).border = borde
                 worksheet.cell(row=18, column=8).border = borde
                 
-                fill_lista_mejor = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") # Fondo verde claro
-                font_lista_mejor = Font(color="006100") # Letra verde oscura
+                fill_lista_mejor = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") 
+                font_lista_mejor = Font(color="006100") 
                 
                 for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=19):
                     celda_nombre = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
                     celda_cursos = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
-                    
                     for cell in [celda_nombre, celda_cursos]:
                         cell.fill = fill_lista_mejor
                         cell.font = font_lista_mejor
@@ -239,11 +227,10 @@ if archivo_subido is not None:
                         cell.alignment = Alignment(vertical="center")
                     celda_cursos.alignment = Alignment(horizontal="center", vertical="center")
                     
-                # Asegurar que todas las filas del Top 10 tengan el alto correcto (30px)
                 for r in range(4, 29):
                     worksheet.row_dimensions[r].height = 30
 
-            st.success("✅ ¡Horario con Listas de Top 10 generado!")
+            st.success("✅ ¡Horario generado con reglas estrictas de progreso!")
             st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Listas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
