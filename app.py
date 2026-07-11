@@ -11,7 +11,6 @@ st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊",
 st.title("🦊 Generador de Horarios de Capacitación - Grupo Zorro")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
-# ¡AQUÍ ESTÁ LA LÍNEA QUE FALTABA! El botón para subir el archivo:
 archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
 
 # ==========================================
@@ -138,15 +137,30 @@ def generar_reporte_excel(df_entrada):
     if not df_horarios.empty:
         df_horarios = df_horarios[df_horarios['Colaborador'] != 'Libre / Sin Asignar'].reset_index(drop=True)
         
+        # --- NUEVAS REGLAS DE SEGMENTACIÓN POR PUESTO ---
         def categorizar_puesto(puesto):
             p_lower = str(puesto).lower()
-            if p_lower == '---': return 'Z_Recesos' 
-            elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): return 'A_Gerencia'
-            elif 'lider' in p_lower or 'líder' in p_lower: return 'B_Lideres'
-            elif 'caja' in p_lower or 'cajer' in p_lower: return 'C_Cajas'
-            elif 'cremer' in p_lower or 'perecedero' in p_lower: return 'D_Cremeria'
-            elif 'autoservicio' in p_lower or 'surtidor' in p_lower: return 'E_Autoservicio'
-            else: return f"F_Otros Puestos"
+            if p_lower == '---': 
+                return 'Z_Recesos' 
+            elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): 
+                return 'A_Gerencia'
+            # 3️⃣ El Líder de Exprezo (o cualquier líder) sube a la categoría líder primero:
+            elif 'lider' in p_lower or 'líder' in p_lower: 
+                return 'B_Lideres'
+            # 3️⃣ Puestos operativos de Exprezo:
+            elif 'exprezo' in p_lower: 
+                return 'C_Exprezo'
+            elif 'caja' in p_lower or 'cajer' in p_lower: 
+                return 'D_Cajas'
+            # 1️⃣ Solo puestos que contengan la palabra estricta 'cremeria'
+            elif 'cremeria' in p_lower or 'cremería' in p_lower: 
+                return 'E_Cremeria'
+            # 2️⃣ Autoservicio absorbe también perecederos y farmacia
+            elif any(k in p_lower for k in ['autoservicio', 'surtidor', 'perecedero', 'farmacia']): 
+                return 'F_Autoservicio'
+            # 4️⃣ Todos los demás se integran bajo una misma categoría general
+            else: 
+                return 'G_Otros Puestos'
 
         df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
         df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
@@ -157,10 +171,11 @@ def generar_reporte_excel(df_entrada):
         nombres_areas = {
             'A_Gerencia': '💼 PERSONAL DE GERENCIA Y ADMINISTRACIÓN',
             'B_Lideres': '⭐ EQUIPO DE LÍDERES Y SUBLÍDERES',
-            'C_Cajas': '💳 EQUIPO DE CAJAS',
-            'D_Cremeria': '🧀 EQUIPO DE CREMERÍA Y PERECEDEROS',
-            'E_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO / SURTIDORES',
-            'F_Otros Puestos': '📦 OTROS PUESTOS OPERATIVOS',
+            'C_Exprezo': '☕ EQUIPO DE EXPREZO',
+            'D_Cajas': '💳 EQUIPO DE CAJAS',
+            'E_Cremeria': '🧀 EQUIPO DE CREMERÍA',
+            'F_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO, SURTIDORES, PERECEDEROS Y FARMACIA',
+            'G_Otros Puestos': '📦 OTROS PUESTOS OPERATIVOS',
             'Z_Recesos': '⚠️ RECESOS Y BLOQUEOS OPERATIVOS EN TIENDA'
         }
         
@@ -182,7 +197,7 @@ def generar_reporte_excel(df_entrada):
     else:
         rows_with_headers = []
 
-    # --- GENERAR EXCEL EN MEMORIA (Optimizado) ---
+    # --- GENERAR EXCEL EN MEMORIA ---
     output = io.BytesIO()
     workbook = Workbook()
     worksheet = workbook.active
@@ -200,20 +215,22 @@ def generar_reporte_excel(df_entrada):
     fills = {
         'A_Gerencia': PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid"),
         'B_Lideres': PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
-        'C_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"),
-        'D_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"),
-        'E_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"),
-        'F_Otros Puestos': PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid"),
+        'C_Exprezo': PatternFill(start_color="EAF1F5", end_color="EAF1F5", fill_type="solid"), # Gris Azulado
+        'D_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"),
+        'E_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"),
+        'F_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"),
+        'G_Otros Puestos': PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid"),
         'Z_Recesos': PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     }
 
     fill_headers = {
         'A_Gerencia': PatternFill(start_color="44245E", end_color="44245E", fill_type="solid"),
         'B_Lideres': PatternFill(start_color="C65911", end_color="C65911", fill_type="solid"),
-        'C_Cajas': PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid"),
-        'D_Cremeria': PatternFill(start_color="7F6000", end_color="7F6000", fill_type="solid"),
-        'E_Autoservicio': PatternFill(start_color="385723", end_color="385723", fill_type="solid"),
-        'F_Otros Puestos': PatternFill(start_color="404040", end_color="404040", fill_type="solid"),
+        'C_Exprezo': PatternFill(start_color="366092", end_color="366092", fill_type="solid"),
+        'D_Cajas': PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid"),
+        'E_Cremeria': PatternFill(start_color="7F6000", end_color="7F6000", fill_type="solid"),
+        'F_Autoservicio': PatternFill(start_color="385723", end_color="385723", fill_type="solid"),
+        'G_Otros Puestos': PatternFill(start_color="595959", end_color="595959", fill_type="solid"),
         'Z_Recesos': PatternFill(start_color="404040", end_color="404040", fill_type="solid")
     }
     
@@ -254,8 +271,8 @@ def generar_reporte_excel(df_entrada):
             cell.font = font_blanca
             cell.alignment = align_left
             
-            cat_header = r.get('Categoria_Orden', 'F_Otros Puestos')
-            h_fill = fill_headers.get(cat_header, fill_headers['F_Otros Puestos'])
+            cat_header = r.get('Categoria_Orden', 'G_Otros Puestos')
+            h_fill = fill_headers.get(cat_header, fill_headers['G_Otros Puestos'])
             
             for c_num in range(1, 6):
                 cell_b = worksheet.cell(row=current_row, column=c_num)
@@ -271,7 +288,7 @@ def generar_reporte_excel(df_entrada):
             r_fill = fills['Z_Recesos']
             f_actual = font_gris
         else:
-            r_fill = fills.get(cat, fills['F_Otros Puestos'])
+            r_fill = fills.get(cat, fills['G_Otros Puestos'])
             f_actual = font_negra
             
         for col_num, val in enumerate(vals, 1):
@@ -304,7 +321,7 @@ def generar_reporte_excel(df_entrada):
     worksheet.column_dimensions['G'].width = 34
     worksheet.column_dimensions['H'].width = 24
     
-    # --- TABLAS LATERALES ---
+    # --- TABLAS LATERALES TOP 10 ---
     worksheet.merge_cells('G4:H4')
     t_peor = worksheet['G4']
     t_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
