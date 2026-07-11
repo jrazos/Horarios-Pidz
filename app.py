@@ -62,7 +62,8 @@ def generar_reporte_excel(df_entrada):
             p_lower = str(puesto).lower()
             if any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']):
                 return 2  
-            elif 'lider' in p_lower or 'líder' in p_lower:
+            # 1️⃣ Los checadores adoptan el límite de 3 veces por semana de los líderes
+            elif any(k in p_lower for k in ['lider', 'líder', 'checador']):
                 return 3  
             else:
                 return 4  
@@ -137,48 +138,49 @@ def generar_reporte_excel(df_entrada):
     if not df_horarios.empty:
         df_horarios = df_horarios[df_horarios['Colaborador'] != 'Libre / Sin Asignar'].reset_index(drop=True)
         
-        # --- NUEVAS REGLAS DE SEGMENTACIÓN EXTENDIDAS ---
+        # --- 2️⃣ CATEGORIZACIÓN ORDENADA ALFABÉTICAMENTE POR TEXTO DEL BANNER ---
         def categorizar_puesto(puesto):
             p_lower = str(puesto).lower()
             if p_lower == '---': 
                 return 'Z_Recesos' 
             elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): 
-                return 'A_Gerencia'
-            elif 'lider' in p_lower or 'líder' in p_lower: 
-                return 'B_Lideres'
-            # 🆕 REGLA NOCTURNOS: Cualquier puesto que diga nocturno
+                return 'E_Gerencia'
+            # 1️⃣ Regla Checador: Si contiene 'lider' o 'checador', va al grupo de líderes
+            elif any(k in p_lower for k in ['lider', 'líder', 'checador']): 
+                return 'F_Lideres'
             elif 'nocturno' in p_lower:
-                return 'C_Nocturnos'
+                return 'G_Nocturnos'
             elif 'exprezo' in p_lower: 
                 return 'D_Exprezo'
             elif 'caja' in p_lower or 'cajer' in p_lower: 
-                return 'E_Cajas'
+                return 'B_Cajas'
             elif 'cremeria' in p_lower or 'cremería' in p_lower: 
-                return 'F_Cremeria'
-            # 🆕 REGLA RECIBO: Surtidor, Bodega, Recibo, Chofer
+                return 'C_Cremeria'
             elif any(k in p_lower for k in ['surtidor', 'bodega', 'recibo', 'chofer']):
-                return 'G_Recibo'
-            # Autoservicio ahora conserva perecederos y farmacia (Surtidores se movieron arriba a recibo)
+                return 'H_Recibo'
             elif any(k in p_lower for k in ['autoservicio', 'perecedero', 'farmacia']): 
-                return 'H_Autoservicio'
+                return 'A_Autoservicio'
             else: 
                 return 'I_Otros Puestos'
 
         df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
+        
+        # 2️⃣ ORDEN ALFABÉTICO ABSOLUTO: 1ro por Grupo, 2do por Colaborador de la A-Z, 3ro por Horario cronológico
         df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
         
         rows_with_headers = []
         ultima_categoria = None
         
+        # Mapeo ordenado de banners según las letras asignadas
         nombres_areas = {
-            'A_Gerencia': '💼 PERSONAL DE GERENCIA Y ADMINISTRACIÓN',
-            'B_Lideres': '⭐ EQUIPO DE LÍDERES Y SUBLÍDERES',
-            'C_Nocturnos': '🌙 EQUIPO DE PERSONAL NOCTURNO',
+            'A_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO, PERECEDEROS Y FARMACIA',
+            'B_Cajas': '💳 EQUIPO DE CAJAS',
+            'C_Cremeria': '🧀 EQUIPO DE CREMERÍA',
             'D_Exprezo': '☕ EQUIPO DE EXPREZO',
-            'E_Cajas': '💳 EQUIPO DE CAJAS',
-            'F_Cremeria': '🧀 EQUIPO DE CREMERÍA',
-            'G_Recibo': '📦 PUESTOS DE RECIBO (RECIBO, BODEGAS, SURTIDORES Y CHOFERES)',
-            'H_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO, PERECEDEROS Y FARMACIA',
+            'E_Gerencia': '💼 PERSONAL DE GERENCIA Y ADMINISTRACIÓN',
+            'F_Lideres': '⭐ EQUIPO DE LÍDERES, SUBLÍDERES Y CHECADORES',
+            'G_Nocturnos': '🌙 EQUIPO DE PERSONAL NOCTURNO',
+            'H_Recibo': '📦 PUESTOS DE RECIBO (RECIBO, BODEGAS, SURTIDORES Y CHOFERES)',
             'I_Otros Puestos': '🔧 OTROS PUESTOS OPERATIVOS',
             'Z_Recesos': '⚠️ RECESOS Y BLOQUEOS OPERATIVOS EN TIENDA'
         }
@@ -217,27 +219,27 @@ def generar_reporte_excel(df_entrada):
     align_valign = Alignment(vertical="center")
 
     fills = {
-        'A_Gerencia': PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid"),
-        'B_Lideres': PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
-        'C_Nocturnos': PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid"), # Gris Noche
-        'D_Exprezo': PatternFill(start_color="EAF1F5", end_color="EAF1F5", fill_type="solid"),
-        'E_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"),
-        'F_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"),
-        'G_Recibo': PatternFill(start_color="EAD1DC", end_color="EAD1DC", fill_type="solid"), # Rosa Pastel Viejo
-        'H_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"),
+        'A_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"), # Verde Claro
+        'B_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"), # Azul
+        'C_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"), # Amarillo
+        'D_Exprezo': PatternFill(start_color="EAF1F5", end_color="EAF1F5", fill_type="solid"), # Gris Azulado
+        'E_Gerencia': PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid"), # Lila
+        'F_Lideres': PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"), # Naranja
+        'G_Nocturnos': PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid"), # Gris Noche
+        'H_Recibo': PatternFill(start_color="EAD1DC", end_color="EAD1DC", fill_type="solid"), # Lila/Rosa
         'I_Otros Puestos': PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid"),
         'Z_Recesos': PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     }
 
     fill_headers = {
-        'A_Gerencia': PatternFill(start_color="44245E", end_color="44245E", fill_type="solid"),
-        'B_Lideres': PatternFill(start_color="C65911", end_color="C65911", fill_type="solid"),
-        'C_Nocturnos': PatternFill(start_color="262626", end_color="262626", fill_type="solid"), # Banner Oscuro Nocturno
+        'A_Autoservicio': PatternFill(start_color="385723", end_color="385723", fill_type="solid"),
+        'B_Cajas': PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid"),
+        'C_Cremeria': PatternFill(start_color="7F6000", end_color="7F6000", fill_type="solid"),
         'D_Exprezo': PatternFill(start_color="366092", end_color="366092", fill_type="solid"),
-        'E_Cajas': PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid"),
-        'F_Cremeria': PatternFill(start_color="7F6000", end_color="7F6000", fill_type="solid"),
-        'G_Recibo': PatternFill(start_color="741B47", end_color="741B47", fill_type="solid"), # Banner Recibo Oscuro
-        'H_Autoservicio': PatternFill(start_color="385723", end_color="385723", fill_type="solid"),
+        'E_Gerencia': PatternFill(start_color="44245E", end_color="44245E", fill_type="solid"),
+        'F_Lideres': PatternFill(start_color="C65911", end_color="C65911", fill_type="solid"),
+        'G_Nocturnos': PatternFill(start_color="262626", end_color="262626", fill_type="solid"),
+        'H_Recibo': PatternFill(start_color="741B47", end_color="741B47", fill_type="solid"),
         'I_Otros Puestos': PatternFill(start_color="595959", end_color="595959", fill_type="solid"),
         'Z_Recesos': PatternFill(start_color="404040", end_color="404040", fill_type="solid")
     }
@@ -329,7 +331,7 @@ def generar_reporte_excel(df_entrada):
     worksheet.column_dimensions['G'].width = 34
     worksheet.column_dimensions['H'].width = 24
     
-    # --- TABLAS LATERALES ---
+    # --- TABLAS LATERALES TOP 10 ---
     worksheet.merge_cells('G4:H4')
     t_peor = worksheet['G4']
     t_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
@@ -380,7 +382,7 @@ if archivo_subido is not None:
         archivo_subido.seek(0) 
         df_crudo = pd.read_excel(archivo_subido)
         
-        with st.spinner("🧠 Calculando agenda y armando el Excel con IA..."):
+        with st.spinner("🧠 Organizando y ordenando alfabéticamente con IA..."):
             excel_bytes, porcentaje, total_gente = generar_reporte_excel(df_crudo)
         
         st.subheader("📈 Estado de Capacitación de la Sucursal")
@@ -396,7 +398,7 @@ if archivo_subido is not None:
         if total_gente == 0:
             st.success("🎉 ¡Felicidades! Todo el personal está al 100%.")
         else:
-            st.success("✅ ¡Horario premium generado y cacheado con éxito!")
+            st.success("✅ ¡Horario premium generado y ordenado alfabéticamente!")
             
             st.download_button(
                 label="📥 Descargar Horario Final", 
