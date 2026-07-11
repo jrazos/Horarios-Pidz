@@ -23,10 +23,8 @@ if archivo_subido is not None:
         
         terminos_pendientes = ['no iniciado', 'no inciado', 'en proceso', 'en progreso', '0%']
         
-        # --- CÁLCULO ESTRICTO DEL PORCENTAJE DE AVANCE ---
         total_cursos = len(df)
         cursos_finalizados = len(df[df['Progreso_clean'] == 'finalizado'])
-        
         filtro_pendientes = df['Progreso_clean'].isin(terminos_pendientes)
         
         if total_cursos > 0:
@@ -68,16 +66,32 @@ if archivo_subido is not None:
             Nombres_Cursos=('Curso_Detalle', lambda x: ', '.join(x))
         ).reset_index()
 
+        # ORDEN DE PRIORIDAD: Los que más deben cursos van primero
         resumen = resumen.sort_values(by='Total_Pendientes', ascending=False)
-        resumen['Turno_Area'] = resumen.groupby('Puesto').cumcount()
-        resumen = resumen.sort_values(by=['Turno_Area', 'Total_Pendientes'], ascending=[True, False])
-
         cola_colaboradores = resumen.to_dict('records')
         total_colaboradores = len(cola_colaboradores)
 
         if total_colaboradores == 0:
             st.success("🎉 ¡Felicidades! Todo el personal está al 100%.")
         else:
+            # 🎯 NUEVAS REGLAS DE FRECUENCIA Y TIEMPO
+            def obtener_limite_semanal(puesto):
+                p_lower = str(puesto).lower()
+                if any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']):
+                    return 2 # Gerencia
+                elif 'lider' in p_lower or 'líder' in p_lower:
+                    return 3 # Líderes
+                else:
+                    return 4 # Demás puestos
+                    
+            limites_semanales = {}
+            sesiones_semana = {}
+            for colab in cola_colaboradores:
+                nombre = colab['Nombre Completo']
+                puesto = colab['Puesto']
+                limites_semanales[nombre] = obtener_limite_semanal(puesto)
+                sesiones_semana[nombre] = 0
+
             indice_colaborador = 0
             tz_mx = pytz.timezone('America/Mexico_City')
             hoy = datetime.now(tz_mx)
@@ -88,7 +102,7 @@ if archivo_subido is not None:
             
             horarios = []
             dias_programados = 0
-            barra_progreso = st.progress(0, text="Generando horarios semanales...")
+            barra_progreso = st.progress(0, text="Generando horarios semanales de 25 min...")
             
             while dias_programados < 7:
                 hora_actual = fecha_actual.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -97,11 +111,16 @@ if archivo_subido is not None:
                 fin_bloqueo = fecha_actual.replace(hour=14, minute=30, second=0, microsecond=0)
                 fecha_texto = f"{dias_semana[fecha_actual.weekday()]} {fecha_actual.day} de {meses[fecha_actual.month]}"
                 
+                sesiones_hoy = {c['Nombre Completo']: 0 for c in cola_colaboradores}
+                
                 while hora_actual < hora_limite:
-                    hora_fin = hora_actual + timedelta(minutes=30)
-                    if hora_actual >= inicio_bloqueo and hora_actual < fin_bloqueo:
+                    # Avanza de 25 en 25 minutos
+                    hora_fin = hora_actual + timedelta(minutes=25)
+                    
+                    # Checar si choca con la comida/receso
+                    if hora_actual < fin_bloqueo and hora_fin > inicio_bloqueo:
                         horarios.append({
-                            'Fecha y Horario': f"{fecha_texto} de {inicio_bloqueo.strftime('%H:%M')} a {fin_bloqueo.strftime('%H:%M')}", 
+                            'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {fin_bloqueo.strftime('%H:%M')}", 
                             'Colaborador': '⚠️ RECESO / OPERACIÓN', 
                             'Puesto': '---', 
                             'Cursos Pendientes (Detalle)': 'Espacio reservado para operación', 
@@ -110,22 +129,50 @@ if archivo_subido is not None:
                         hora_actual = fin_bloqueo
                         continue 
                     
-                    colaborador = cola_colaboradores[indice_colaborador]
-                    horarios.append({
-                        'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
-                        'Colaborador': colaborador['Nombre Completo'], 
-                        'Puesto': colaborador['Puesto'],
-                        'Cursos Pendientes (Detalle)': colaborador['Nombres_Cursos'], 
-                        'Total': colaborador['Total_Pendientes']
-                    })
+                    # Buscar al siguiente colaborador disponible que no haya superado sus límites
+                    encontrado = False
+                    intentos = 0
+                    while intentos < total_colaboradores:
+                        colab = cola_colaboradores[indice_colaborador]
+                        nombre = colab['Nombre Completo']
+                        
+                        # Si no ha pasado su límite semanal y no ha tomado curso hoy
+                        if sesiones_semana[nombre] < limites_semanales[nombre] and sesiones_hoy[nombre] < 1:
+                            encontrado = True
+                            break
+                        indice_colaborador = (indice_colaborador + 1) % total_colaboradores
+                        intentos += 1
+                        
+                    if encontrado:
+                        horarios.append({
+                            'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
+                            'Colaborador': nombre, 
+                            'Puesto': colab['Puesto'],
+                            'Cursos Pendientes (Detalle)': colab['Nombres_Cursos'], 
+                            'Total': colab['Total_Pendientes']
+                        })
+                        sesiones_semana[nombre] += 1
+                        sesiones_hoy[nombre] += 1
+                        indice_colaborador = (indice_colaborador + 1) % total_colaboradores
+                    else:
+                        # Si nadie puede tomar este bloque, queda libre
+                        horarios.append({
+                            'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
+                            'Colaborador': 'Libre / Sin Asignar', 
+                            'Puesto': '---', 
+                            'Cursos Pendientes (Detalle)': '---', 
+                            'Total': 0
+                        })
+                        
                     hora_actual = hora_fin
-                    indice_colaborador = (indice_colaborador + 1) % total_colaboradores 
+                    
                 fecha_actual += timedelta(days=1)
                 dias_programados += 1
                 barra_progreso.progress(int((dias_programados/7)*100))
 
             df_horarios = pd.DataFrame(horarios)
             
+            # --- 🎨 CATEGORÍAS Y COLORES POR ÁREA ---
             def categorizar_puesto(puesto):
                 p_lower = str(puesto).lower()
                 if p_lower == '---':
@@ -139,24 +186,34 @@ if archivo_subido is not None:
                 elif 'autoservicio' in p_lower or 'surtidor' in p_lower:
                     return 'D_Autoservicio'
                 else:
-                    return f"E_{str(puesto).title()}"
+                    return f"E_Otros" # Líderes generales, prevención, etc.
             
+            # Ordenamos por Área, luego Colaborador, luego Fecha
             df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
             df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
             df_horarios = df_horarios.drop(columns=['Categoria_Orden'])
 
             def aplicar_estilos(row):
-                dia = row['Fecha y Horario'].split()[0]
-                colores_dia = {
-                    'lunes': 'background-color: #ffcccc', 'martes': 'background-color: #ccffcc', 
-                    'miércoles': 'background-color: #ffffcc', 'jueves': 'background-color: #ffe6cc', 
-                    'viernes': 'background-color: #cce5ff', 'sábado': 'background-color: #e6ccff', 
-                    'domingo': 'background-color: #e6e6e6'
-                }
-                estilos = [colores_dia.get(dia, '')] * len(row)
-                if row['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
-                    estilos = ['background-color: #d9d9d9'] * len(row)
+                colab = row['Colaborador']
+                puesto = row['Puesto']
+                cat = categorizar_puesto(puesto)
+                
+                # Asignación de colores corporativos por área
+                if colab == '⚠️ RECESO / OPERACIÓN' or colab == 'Libre / Sin Asignar':
+                    estilos = ['background-color: #f2f2f2; color: #808080'] * len(row) # Gris claro
+                elif cat == 'A_Gerencia':
+                    estilos = ['background-color: #e6e6fa'] * len(row) # Lila / Morado
+                elif cat == 'B_Cajas':
+                    estilos = ['background-color: #cce5ff'] * len(row) # Azul
+                elif cat == 'C_Cremería y Perecederos':
+                    estilos = ['background-color: #ffffcc'] * len(row) # Amarillo
+                elif cat == 'D_Autoservicio':
+                    estilos = ['background-color: #d9ead3'] * len(row) # Verde
                 else:
+                    estilos = ['background-color: #fce5cd'] * len(row) # Naranja claro (Líderes extra)
+                    
+                # Semáforo para Total de Pendientes
+                if str(row['Total']).isdigit() and int(row['Total']) > 0:
                     idx_pend = row.index.get_loc('Total')
                     pendientes = int(row['Total'])
                     if pendientes >= 10: estilos[idx_pend] = 'background-color: #ff4d4d; color: white; font-weight: bold;' 
@@ -166,6 +223,7 @@ if archivo_subido is not None:
 
             df_estilizado = df_horarios.style.apply(aplicar_estilos, axis=1)
 
+            # --- EXCEL FORMATTING ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_estilizado.to_excel(writer, index=False, sheet_name='Horarios', startrow=3)
@@ -210,7 +268,7 @@ if archivo_subido is not None:
                 worksheet.column_dimensions['G'].width = 35
                 worksheet.column_dimensions['H'].width = 25
                 
-                # --- TOP 10 PEOR ---
+                # --- TOP 10 MAYOR REZAGO ---
                 worksheet.merge_cells('G4:H4')
                 titulo_peor = worksheet['G4']
                 titulo_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
@@ -233,7 +291,7 @@ if archivo_subido is not None:
                         cell.alignment = Alignment(vertical="center")
                     celda_cursos.alignment = Alignment(horizontal="center", vertical="center")
 
-                # --- TOP 10 MEJOR ---
+                # --- TOP 10 MEJOR APROVECHAMIENTO ---
                 worksheet.merge_cells('G18:H18')
                 titulo_mejor = worksheet['G18']
                 titulo_mejor.value = "🌟 TOP 10 - MEJOR APROVECHAMIENTO"
@@ -246,7 +304,6 @@ if archivo_subido is not None:
                 fill_lista_mejor = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") 
                 font_lista_mejor = Font(color="006100") 
                 
-                # ¡AQUÍ ESTÁ LA CORRECCIÓN! Agregué 'value=' para que escriba los datos
                 for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=19):
                     celda_nombre = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
                     celda_cursos = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
@@ -260,8 +317,8 @@ if archivo_subido is not None:
                 for r in range(4, 29):
                     worksheet.row_dimensions[r].height = 30
 
-            st.success("✅ ¡Horario generado y agrupado por áreas con éxito!")
-            st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Agrupados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.success("✅ ¡Horario generado con bloques de 25min, límites y colores por puesto!")
+            st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Colores.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
         st.error(f"❌ Error técnico: {e}")
