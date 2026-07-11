@@ -164,38 +164,40 @@ if archivo_subido is not None:
 
             df_horarios = pd.DataFrame(horarios)
             
-            # 🛑 REGLA 2: ELIMINAR LOS RENGLONES VACÍOS DEL FINAL
             df_horarios = df_horarios[df_horarios['Colaborador'] != 'Libre / Sin Asignar'].reset_index(drop=True)
             
-            # --- CLASIFICACIÓN EXHAUSTIVA POR ÁREAS ---
+            # --- NUEVA CLASIFICACIÓN EXHAUSTIVA POR ÁREAS (CON LÍDERES APARTE) ---
             def categorizar_puesto(puesto):
                 p_lower = str(puesto).lower()
                 if p_lower == '---':
                     return 'Z_Recesos' 
                 elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']):
                     return 'A_Gerencia'
+                # La nueva regla entra aquí antes de evaluar las áreas, para "atrapar" a todos los líderes:
+                elif 'lider' in p_lower or 'líder' in p_lower:
+                    return 'B_Lideres'
                 elif 'caja' in p_lower or 'cajer' in p_lower:
-                    return 'B_Cajas'
+                    return 'C_Cajas'
                 elif 'cremer' in p_lower or 'perecedero' in p_lower:
-                    return 'C_Cremería y Perecederos'
+                    return 'D_Cremeria'
                 elif 'autoservicio' in p_lower or 'surtidor' in p_lower:
-                    return 'D_Autoservicio'
+                    return 'E_Autoservicio'
                 else:
-                    return f"E_Otros Puestos y Líderes"
+                    return f"F_Otros Puestos"
 
             df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
             df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
             
-            # 🛑 REGLA 1: CONSTRUIR LA ESTRUCTURA CON SEPARADORES Y TÍTULOS EN BLANCO
             rows_with_headers = []
             ultima_categoria = None
             
             nombres_areas = {
                 'A_Gerencia': '💼 PERSONAL DE GERENCIA Y ADMINISTRACIÓN (Morado)',
-                'B_Cajas': '💳 EQUIPO DE CAJAS (Azul)',
-                'C_Cremería y Perecederos': '🧀 EQUIPO DE CREMERÍA Y PERECEDEROS (Amarillo)',
-                'D_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO / SURTIDORES (Verde)',
-                'E_Otros Puestos y Líderes': '📦 LÍDERES Y OTROS PUESTOS OPERATIVOS',
+                'B_Lideres': '⭐ EQUIPO DE LÍDERES Y SUBLÍDERES (Naranja)',
+                'C_Cajas': '💳 EQUIPO DE CAJAS (Azul)',
+                'D_Cremeria': '🧀 EQUIPO DE CREMERÍA Y PERECEDEROS (Amarillo)',
+                'E_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO / SURTIDORES (Verde)',
+                'F_Otros Puestos': '📦 OTROS PUESTOS OPERATIVOS',
                 'Z_Recesos': '⚠️ RECESOS Y BLOQUEOS OPERATIVOS EN TIENDA'
             }
             
@@ -215,7 +217,7 @@ if archivo_subido is not None:
                 data_row['Es_Header'] = False
                 rows_with_headers.append(data_row)
 
-            # --- 🎨 CONSTRUCCIÓN PREMIUM Y NATIVA DEL EXCEL (SIN PANDAS) ---
+            # --- 🎨 CONSTRUCCIÓN PREMIUM Y NATIVA DEL EXCEL ---
             output = io.BytesIO()
             workbook = Workbook()
             worksheet = workbook.active
@@ -261,6 +263,7 @@ if archivo_subido is not None:
                     
                     t_upper = r['Titulo'].upper()
                     if "GERENCIA" in t_upper: f_color = "44245E" 
+                    elif "LÍDER" in t_upper: f_color = "C65911" # Banner Naranja Oscuro para Líderes
                     elif "CAJAS" in t_upper: f_color = "1F4E79" 
                     elif "CREMERÍA" in t_upper: f_color = "7F6000" 
                     elif "AUTOSERVICIO" in t_upper: f_color = "385723" 
@@ -283,17 +286,20 @@ if archivo_subido is not None:
                 elif cat == 'A_Gerencia':
                     r_fill = PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid")
                     f_color = "000000"
-                elif cat == 'B_Cajas':
+                elif cat == 'B_Lideres':
+                    r_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid") # Naranja Suave
+                    f_color = "000000"
+                elif cat == 'C_Cajas':
                     r_fill = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid")
                     f_color = "000000"
-                elif cat == 'C_Cremería y Perecederos':
+                elif cat == 'D_Cremeria':
                     r_fill = PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid")
                     f_color = "000000"
-                elif cat == 'D_Autoservicio':
+                elif cat == 'E_Autoservicio':
                     r_fill = PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid")
                     f_color = "000000"
                 else:
-                    r_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+                    r_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
                     f_color = "000000"
                     
                 for col_num, val in enumerate(vals, 1):
@@ -365,10 +371,9 @@ if archivo_subido is not None:
             for r in range(4, 29):
                 worksheet.row_dimensions[r].height = 28
 
-            # AQUÍ ES DONDE SUCEDE LA MAGIA DE GUARDAR CORRECTAMENTE
             workbook.save(output)
 
-        st.success("✅ ¡Horario premium generado con éxito con separadores visuales!")
+        st.success("✅ ¡Horario premium generado con éxito! Líderes agrupados por separado.")
         st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Premium.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
