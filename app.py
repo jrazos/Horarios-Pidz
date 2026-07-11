@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import io
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊", layout="wide")
@@ -76,11 +77,11 @@ if archivo_subido is not None:
             def obtener_limite_semanal(puesto):
                 p_lower = str(puesto).lower()
                 if any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']):
-                    return 2  # Gerencia: Max 2 veces
+                    return 2  
                 elif 'lider' in p_lower or 'líder' in p_lower:
-                    return 3  # Líderes/Sublideres: Max 3 veces
+                    return 3  
                 else:
-                    return 4  # Demás puestos: Max 4 veces
+                    return 4  
                     
             limites_semanales = {}
             sesiones_semana = {}
@@ -111,7 +112,7 @@ if archivo_subido is not None:
                 sesiones_hoy = {c['Nombre Completo']: 0 for c in cola_colaboradores}
                 
                 while hora_actual < hora_limite:
-                    hora_fin = hora_actual + timedelta(minutes=25)  # ⏰ Bloques estrictos de 25 minutos
+                    hora_fin = hora_actual + timedelta(minutes=25) 
                     
                     if hora_actual < fin_bloqueo and hora_fin > inicio_bloqueo:
                         horarios.append({
@@ -202,9 +203,7 @@ if archivo_subido is not None:
                 cat = row['Categoria_Orden']
                 if cat != ultima_categoria:
                     if ultima_categoria is not None:
-                        # Inserta renglón en blanco de separación
                         rows_with_headers.append({'Es_Blanco': True, 'Es_Header': False})
-                    # Inserta el Banner del Puesto
                     rows_with_headers.append({
                         'Es_Blanco': False, 'Es_Header': True, 
                         'Titulo': nombres_areas.get(cat, 'ÁREA OPERATIVA')
@@ -216,169 +215,161 @@ if archivo_subido is not None:
                 data_row['Es_Header'] = False
                 rows_with_headers.append(data_row)
 
-            # --- 🎨 CONSTRUCCIÓN PREMIUM Y NATIVA DEL EXCEL CON OPENPYXL ---
+            # --- 🎨 CONSTRUCCIÓN PREMIUM Y NATIVA DEL EXCEL (SIN PANDAS) ---
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                workbook = writer.book
-                worksheet = workbook.active
-                worksheet.title = 'Horarios'
-                
-                borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
-                
-                # Banner Principal de Sucursal
-                worksheet.merge_cells('A1:E2')
-                celda_titulo = worksheet['A1']
-                celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | AVANCE DE SUCURSAL: {porcentaje_avance:.1f}%"
-                celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=16)
-                celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
-                celda_titulo.alignment = Alignment(horizontal="center", vertical="center")
-                
-                for r_t in range(1, 3):
-                    for c_t in range(1, 6):
-                        worksheet.cell(row=r_t, column=c_t).border = borde
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = 'Horarios'
+            
+            borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
+            
+            worksheet.merge_cells('A1:E2')
+            celda_titulo = worksheet['A1']
+            celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | AVANCE DE SUCURSAL: {porcentaje_avance:.1f}%"
+            celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=16)
+            celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+            celda_titulo.alignment = Alignment(horizontal="center", vertical="center")
+            
+            for r_t in range(1, 3):
+                for c_t in range(1, 6):
+                    worksheet.cell(row=r_t, column=c_t).border = borde
 
-                # Encabezados de Columnas (Fila 4)
-                headers = ['Fecha y Horario', 'Colaborador', 'Puesto', 'Cursos Pendientes (Detalle)', 'Total']
-                for col_num, h_text in enumerate(headers, 1):
-                    cell = worksheet.cell(row=4, column=col_num, value=h_text)
-                    cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
-                    cell.font = Font(color="FFFFFF", bold=True, size=11)
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                    cell.border = borde
-                worksheet.row_dimensions[4].height = 28
+            headers = ['Fecha y Horario', 'Colaborador', 'Puesto', 'Cursos Pendientes (Detalle)', 'Total']
+            for col_num, h_text in enumerate(headers, 1):
+                cell = worksheet.cell(row=4, column=col_num, value=h_text)
+                cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
+                cell.font = Font(color="FFFFFF", bold=True, size=11)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = borde
+            worksheet.row_dimensions[4].height = 28
 
-                # Procesar Filas Dinámicas de la Tabla
-                current_row = 5
-                for r in rows_with_headers:
-                    worksheet.row_dimensions[current_row].height = 28
-                    
-                    if r['Es_Blanco']:
-                        # Fila divisoria vacía
-                        for c_num in range(1, 6):
-                            worksheet.cell(row=current_row, column=c_num, value="")
-                        current_row += 1
-                        continue
-                        
-                    if r['Es_Header']:
-                        # Fila de Título del Puesto (Banner Oscuro)
-                        worksheet.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=5)
-                        cell = worksheet.cell(row=current_row, column=1, value=r['Titulo'])
-                        cell.font = Font(color="FFFFFF", bold=True, size=11)
-                        cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-                        
-                        t_upper = r['Titulo'].upper()
-                        if "GERENCIA" in t_upper: f_color = "44245E" # Lila Oscuro
-                        elif "CAJAS" in t_upper: f_color = "1F4E79" # Azul Marino
-                        elif "CREMERÍA" in t_upper: f_color = "7F6000" # Amarillo Café Oscuro
-                        elif "AUTOSERVICIO" in t_upper: f_color = "385723" # Verde Bosque O.
-                        else: f_color = "404040" # Gris Carbón
-                        
-                        h_fill = PatternFill(start_color=f_color, end_color=f_color, fill_type="solid")
-                        for c_num in range(1, 6):
-                            cell_b = worksheet.cell(row=current_row, column=c_num)
-                            cell_b.fill = h_fill
-                            cell_b.border = borde
-                        current_row += 1
-                        continue
-                    
-                    # Renglón Normal de Colaborador
-                    vals = [r['Fecha y Horario'], r['Colaborador'], r['Puesto'], r['Cursos Pendientes (Detalle)'], r['Total']]
-                    cat = categorizar_puesto(r['Puesto'])
-                    
-                    # Colores Pasteles solicitados por área
-                    if r['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
-                        r_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid") # Gris
-                        f_color = "808080"
-                    elif cat == 'A_Gerencia':
-                        r_fill = PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid") # Lila Claro
-                        f_color = "000000"
-                    elif cat == 'B_Cajas':
-                        r_fill = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid") # Azul Pastel
-                        f_color = "000000"
-                    elif cat == 'C_Cremería y Perecederos':
-                        r_fill = PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid") # Amarillo Claro
-                        f_color = "000000"
-                    elif cat == 'D_Autoservicio':
-                        r_fill = PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid") # Verde Claro
-                        f_color = "000000"
-                    else:
-                        r_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid") # Naranja Suave
-                        f_color = "000000"
-                        
-                    for col_num, val in enumerate(vals, 1):
-                        cell = worksheet.cell(row=current_row, column=col_num, value=val)
-                        cell.fill = r_fill
-                        cell.font = Font(color=f_color, size=10)
-                        cell.border = borde
-                        cell.alignment = Alignment(vertical="center", wrap_text=True if col_num == 4 else False)
-                        
-                        # Semáforo de Alerta estricto en la celda 'Total'
-                        if col_num == 5 and isinstance(val, (int, float)) and val > 0:
-                            if val >= 10:
-                                cell.fill = PatternFill(start_color="FF4D4D", end_color="FF4D4D", fill_type="solid")
-                                cell.font = Font(color="FFFFFF", bold=True)
-                            elif 4 <= val <= 9:
-                                cell.fill = PatternFill(start_color="FFCC00", end_color="FFCC00", fill_type="solid")
-                                cell.font = Font(color="000000", bold=True)
-                            elif 1 <= val <= 3:
-                                cell.fill = PatternFill(start_color="00CC66", end_color="00CC66", fill_type="solid")
-                                cell.font = Font(color="FFFFFF", bold=True)
-                            cell.alignment = Alignment(horizontal="center", vertical="center")
-                            
+            current_row = 5
+            for r in rows_with_headers:
+                worksheet.row_dimensions[current_row].height = 28
+                
+                if r['Es_Blanco']:
+                    for c_num in range(1, 6):
+                        worksheet.cell(row=current_row, column=c_num, value="")
                     current_row += 1
-
-                # Ajustes de dimensiones de Columnas
-                worksheet.column_dimensions['A'].width = 30
-                worksheet.column_dimensions['B'].width = 32
-                worksheet.column_dimensions['C'].width = 24
-                worksheet.column_dimensions['D'].width = 46
-                worksheet.column_dimensions['E'].width = 12
-                worksheet.column_dimensions['F'].width = 4
-                worksheet.column_dimensions['G'].width = 34
-                worksheet.column_dimensions['H'].width = 24
-                
-                # --- TABLAS LATERALES TOP 10 (G y H) ---
-                worksheet.merge_cells('G4:H4')
-                t_peor = worksheet['G4']
-                t_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
-                t_peor.fill = PatternFill(start_color="ff4d4d", end_color="ff4d4d", fill_type="solid")
-                t_peor.font = Font(color="FFFFFF", bold=True)
-                t_peor.alignment = Alignment(horizontal="center", vertical="center")
-                worksheet.cell(row=4, column=7).border = borde
-                worksheet.cell(row=4, column=8).border = borde
-                
-                fill_p = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
-                font_p = Font(color="9C0006") 
-                for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=5):
-                    c_n = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
-                    c_c = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
-                    for cell in [c_n, c_c]:
-                        cell.fill = fill_p; cell.font = font_p; cell.border = borde; cell.alignment = Alignment(vertical="center")
-                    c_c.alignment = Alignment(horizontal="center", vertical="center")
-
-                worksheet.merge_cells('G18:H18')
-                t_mejor = worksheet['G18']
-                t_mejor.value = "🌟 TOP 10 - MEJOR APROVECHAMIENTO"
-                t_mejor.fill = PatternFill(start_color="00cc66", end_color="00cc66", fill_type="solid")
-                t_mejor.font = Font(color="FFFFFF", bold=True)
-                t_mejor.alignment = Alignment(horizontal="center", vertical="center")
-                worksheet.cell(row=18, column=7).border = borde
-                worksheet.cell(row=18, column=8).border = borde
-                
-                fill_m = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") 
-                font_m = Font(color="006100") 
-                for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=19):
-                    c_n2 = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
-                    c_c2 = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
-                    for cell in [c_n2, c_c2]:
-                        cell.fill = fill_m; cell.font = font_m; cell.border = borde; cell.alignment = Alignment(vertical="center")
-                    c_c2.alignment = Alignment(horizontal="center", vertical="center")
+                    continue
                     
-                for r in range(4, 29):
-                    worksheet.row_dimensions[r].height = 28
+                if r['Es_Header']:
+                    worksheet.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=5)
+                    cell = worksheet.cell(row=current_row, column=1, value=r['Titulo'])
+                    cell.font = Font(color="FFFFFF", bold=True, size=11)
+                    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+                    
+                    t_upper = r['Titulo'].upper()
+                    if "GERENCIA" in t_upper: f_color = "44245E" 
+                    elif "CAJAS" in t_upper: f_color = "1F4E79" 
+                    elif "CREMERÍA" in t_upper: f_color = "7F6000" 
+                    elif "AUTOSERVICIO" in t_upper: f_color = "385723" 
+                    else: f_color = "404040" 
+                    
+                    h_fill = PatternFill(start_color=f_color, end_color=f_color, fill_type="solid")
+                    for c_num in range(1, 6):
+                        cell_b = worksheet.cell(row=current_row, column=c_num)
+                        cell_b.fill = h_fill
+                        cell_b.border = borde
+                    current_row += 1
+                    continue
+                
+                vals = [r['Fecha y Horario'], r['Colaborador'], r['Puesto'], r['Cursos Pendientes (Detalle)'], r['Total']]
+                cat = categorizar_puesto(r['Puesto'])
+                
+                if r['Colaborador'] == '⚠️ RECESO / OPERACIÓN':
+                    r_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+                    f_color = "808080"
+                elif cat == 'A_Gerencia':
+                    r_fill = PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid")
+                    f_color = "000000"
+                elif cat == 'B_Cajas':
+                    r_fill = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid")
+                    f_color = "000000"
+                elif cat == 'C_Cremería y Perecederos':
+                    r_fill = PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid")
+                    f_color = "000000"
+                elif cat == 'D_Autoservicio':
+                    r_fill = PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid")
+                    f_color = "000000"
+                else:
+                    r_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+                    f_color = "000000"
+                    
+                for col_num, val in enumerate(vals, 1):
+                    cell = worksheet.cell(row=current_row, column=col_num, value=val)
+                    cell.fill = r_fill
+                    cell.font = Font(color=f_color, size=10)
+                    cell.border = borde
+                    cell.alignment = Alignment(vertical="center", wrap_text=True if col_num == 4 else False)
+                    
+                    if col_num == 5 and isinstance(val, (int, float)) and val > 0:
+                        if val >= 10:
+                            cell.fill = PatternFill(start_color="FF4D4D", end_color="FF4D4D", fill_type="solid")
+                            cell.font = Font(color="FFFFFF", bold=True)
+                        elif 4 <= val <= 9:
+                            cell.fill = PatternFill(start_color="FFCC00", end_color="FFCC00", fill_type="solid")
+                            cell.font = Font(color="000000", bold=True)
+                        elif 1 <= val <= 3:
+                            cell.fill = PatternFill(start_color="00CC66", end_color="00CC66", fill_type="solid")
+                            cell.font = Font(color="FFFFFF", bold=True)
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                        
+                current_row += 1
 
-            st.success("✅ ¡Horario premium generado con éxito con separadores visuales!")
-            st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Premium.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            worksheet.column_dimensions['A'].width = 30
+            worksheet.column_dimensions['B'].width = 32
+            worksheet.column_dimensions['C'].width = 24
+            worksheet.column_dimensions['D'].width = 46
+            worksheet.column_dimensions['E'].width = 12
+            worksheet.column_dimensions['F'].width = 4
+            worksheet.column_dimensions['G'].width = 34
+            worksheet.column_dimensions['H'].width = 24
+            
+            worksheet.merge_cells('G4:H4')
+            t_peor = worksheet['G4']
+            t_peor.value = "⚠️ TOP 10 - MAYOR REZAGO"
+            t_peor.fill = PatternFill(start_color="ff4d4d", end_color="ff4d4d", fill_type="solid")
+            t_peor.font = Font(color="FFFFFF", bold=True)
+            t_peor.alignment = Alignment(horizontal="center", vertical="center")
+            worksheet.cell(row=4, column=7).border = borde
+            worksheet.cell(row=4, column=8).border = borde
+            
+            fill_p = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
+            font_p = Font(color="9C0006") 
+            for i, (idx, fila) in enumerate(top_10_peor.iterrows(), start=5):
+                c_n = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
+                c_c = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
+                for cell in [c_n, c_c]:
+                    cell.fill = fill_p; cell.font = font_p; cell.border = borde; cell.alignment = Alignment(vertical="center")
+                c_c.alignment = Alignment(horizontal="center", vertical="center")
+
+            worksheet.merge_cells('G18:H18')
+            t_mejor = worksheet['G18']
+            t_mejor.value = "🌟 TOP 10 - MEJOR APROVECHAMIENTO"
+            t_mejor.fill = PatternFill(start_color="00cc66", end_color="00cc66", fill_type="solid")
+            t_mejor.font = Font(color="FFFFFF", bold=True)
+            t_mejor.alignment = Alignment(horizontal="center", vertical="center")
+            worksheet.cell(row=18, column=7).border = borde
+            worksheet.cell(row=18, column=8).border = borde
+            
+            fill_m = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid") 
+            font_m = Font(color="006100") 
+            for i, (idx, fila) in enumerate(top_10_mejor.iterrows(), start=19):
+                c_n2 = worksheet.cell(row=i, column=7, value=fila['Nombre Completo'])
+                c_c2 = worksheet.cell(row=i, column=8, value=f"{fila['Pendientes']} cursos por hacer")
+                for cell in [c_n2, c_c2]:
+                    cell.fill = fill_m; cell.font = font_m; cell.border = borde; cell.alignment = Alignment(vertical="center")
+                c_c2.alignment = Alignment(horizontal="center", vertical="center")
+                
+            for r in range(4, 29):
+                worksheet.row_dimensions[r].height = 28
+
+            # AQUÍ ES DONDE SUCEDE LA MAGIA DE GUARDAR CORRECTAMENTE
+            workbook.save(output)
+
+        st.success("✅ ¡Horario premium generado con éxito con separadores visuales!")
+        st.download_button(label="📥 Descargar Horario Final", data=output.getvalue(), file_name="Horarios_Zorro_Premium.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
         st.error(f"❌ Error técnico: {e}")
