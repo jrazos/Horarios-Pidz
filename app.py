@@ -11,6 +11,9 @@ st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊",
 st.title("🦊 Generador de Horarios de Capacitación - Grupo Zorro")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
+# ¡AQUÍ ESTÁ LA LÍNEA QUE FALTABA! El botón para subir el archivo:
+archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
+
 # ==========================================
 # 🧠 CEREBRO CACHEADO (Súper Optimizado)
 # ==========================================
@@ -185,7 +188,6 @@ def generar_reporte_excel(df_entrada):
     worksheet = workbook.active
     worksheet.title = 'Horarios'
     
-    # Definición de variables globales para ahorrar RAM
     borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
     font_blanca = Font(color="FFFFFF", bold=True, size=11)
     font_negra = Font(color="000000", size=10)
