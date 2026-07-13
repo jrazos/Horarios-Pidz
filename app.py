@@ -14,7 +14,7 @@ st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo e
 archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
 
 # ==========================================
-# 🧠 CEREBRO CACHEADO (Súper Optimizado)
+# 🧠 CEREBRO CACHEADO (Opción B - Prioridad Estricta)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def generar_reporte_excel(df_entrada):
@@ -51,6 +51,7 @@ def generar_reporte_excel(df_entrada):
         Nombres_Cursos=('Curso_Detalle', lambda x: ', '.join(x))
     ).reset_index()
 
+    # ORDEN DE PRIORIDAD ABSOLUTO: Los que más deben cursos van primero en la fila
     resumen = resumen.sort_values(by='Total_Pendientes', ascending=False)
     cola_colaboradores = resumen.to_dict('records')
     total_colaboradores = len(cola_colaboradores)
@@ -58,20 +59,24 @@ def generar_reporte_excel(df_entrada):
     horarios = []
     
     if total_colaboradores > 0:
-        def obtener_limite_semanal(puesto):
+        def obtener_limite_base(puesto):
             p_lower = str(puesto).lower()
             if any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']):
                 return 2  
-            # 1️⃣ Los checadores adoptan el límite de 3 veces por semana de los líderes
-            elif any(k in p_lower for k in ['lider', 'líder', 'checador']):
+            elif any(k in p_lower for k in ['lider', 'líder', 'checador']): 
                 return 3  
             else:
                 return 4  
                 
-        limites_semanales = {c['Nombre Completo']: obtener_limite_semanal(c['Puesto']) for c in cola_colaboradores}
-        sesiones_semana = {c['Nombre Completo']: 0 for c in cola_colaboradores}
+        limites_semanales = {}
+        sesiones_semana = {}
+        for c in cola_colaboradores:
+            nombre = c['Nombre Completo']
+            limite_puesto = obtener_limite_base(c['Puesto'])
+            # 🎯 REGLA DE TOPE INTELIGENTE: Máximo asignable según su puesto O según los cursos que debe realmente
+            limites_semanales[nombre] = min(limite_puesto, int(c['Total_Pendientes']))
+            sesiones_semana[nombre] = 0
 
-        indice_colaborador = 0
         tz_mx = pytz.timezone('America/Mexico_City')
         hoy = datetime.now(tz_mx)
         fecha_actual = hoy + timedelta(days=1)
@@ -102,28 +107,24 @@ def generar_reporte_excel(df_entrada):
                     hora_actual = fin_bloqueo
                     continue 
                 
+                # 🎯 LÓGICA OPCIÓN B: Cada bloque nuevo busca desde el inicio (índice 0) para asegurar los 4 días al más rezagado
                 encontrado = False
-                intentos = 0
-                while intentos < total_colaboradores:
-                    colab = cola_colaboradores[indice_colaborador]
+                for idx_c in range(total_colaboradores):
+                    colab = cola_colaboradores[idx_c]
                     nombre = colab['Nombre Completo']
                     
                     if sesiones_semana[nombre] < limites_semanales[nombre] and sesiones_hoy[nombre] < 1:
+                        horarios.append({
+                            'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
+                            'Colaborador': nombre, 'Puesto': colab['Puesto'],
+                            'Cursos Pendientes (Detalle)': colab['Nombres_Cursos'], 'Total': colab['Total_Pendientes']
+                        })
+                        sesiones_semana[nombre] += 1
+                        sesiones_hoy[nombre] += 1
                         encontrado = True
-                        break
-                    indice_colaborador = (indice_colaborador + 1) % total_colaboradores
-                    intentos += 1
-                    
-                if encontrado:
-                    horarios.append({
-                        'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
-                        'Colaborador': nombre, 'Puesto': colab['Puesto'],
-                        'Cursos Pendientes (Detalle)': colab['Nombres_Cursos'], 'Total': colab['Total_Pendientes']
-                    })
-                    sesiones_semana[nombre] += 1
-                    sesiones_hoy[nombre] += 1
-                    indice_colaborador = (indice_colaborador + 1) % total_colaboradores
-                else:
+                        break # Asignado con éxito, saltamos al siguiente bloque de tiempo
+                
+                if not encontrado:
                     horarios.append({
                         'Fecha y Horario': f"{fecha_texto} de {hora_actual.strftime('%H:%M')} a {hora_fin.strftime('%H:%M')}",
                         'Colaborador': 'Libre / Sin Asignar', 'Puesto': '---', 
@@ -138,14 +139,13 @@ def generar_reporte_excel(df_entrada):
     if not df_horarios.empty:
         df_horarios = df_horarios[df_horarios['Colaborador'] != 'Libre / Sin Asignar'].reset_index(drop=True)
         
-        # --- 2️⃣ CATEGORIZACIÓN ORDENADA ALFABÉTICAMENTE POR TEXTO DEL BANNER ---
+        # --- CLASIFICACIÓN Y ORDENAMIENTO ALFABÉTICO TOTAL ---
         def categorizar_puesto(puesto):
             p_lower = str(puesto).lower()
             if p_lower == '---': 
                 return 'Z_Recesos' 
             elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): 
                 return 'E_Gerencia'
-            # 1️⃣ Regla Checador: Si contiene 'lider' o 'checador', va al grupo de líderes
             elif any(k in p_lower for k in ['lider', 'líder', 'checador']): 
                 return 'F_Lideres'
             elif 'nocturno' in p_lower:
@@ -165,13 +165,12 @@ def generar_reporte_excel(df_entrada):
 
         df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
         
-        # 2️⃣ ORDEN ALFABÉTICO ABSOLUTO: 1ro por Grupo, 2do por Colaborador de la A-Z, 3ro por Horario cronológico
+        # 🔤 ORDEN ALFABÉTICO PERFECTO (Grupos y Nombres)
         df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
         
         rows_with_headers = []
         ultima_categoria = None
         
-        # Mapeo ordenado de banners según las letras asignadas
         nombres_areas = {
             'A_Autoservicio': '🛒 EQUIPO DE AUTOSERVICIO, PERECEDEROS Y FARMACIA',
             'B_Cajas': '💳 EQUIPO DE CAJAS',
@@ -219,14 +218,14 @@ def generar_reporte_excel(df_entrada):
     align_valign = Alignment(vertical="center")
 
     fills = {
-        'A_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"), # Verde Claro
-        'B_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"), # Azul
-        'C_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"), # Amarillo
-        'D_Exprezo': PatternFill(start_color="EAF1F5", end_color="EAF1F5", fill_type="solid"), # Gris Azulado
-        'E_Gerencia': PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid"), # Lila
-        'F_Lideres': PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"), # Naranja
-        'G_Nocturnos': PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid"), # Gris Noche
-        'H_Recibo': PatternFill(start_color="EAD1DC", end_color="EAD1DC", fill_type="solid"), # Lila/Rosa
+        'A_Autoservicio': PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid"), 
+        'B_Cajas': PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid"), 
+        'C_Cremeria': PatternFill(start_color="FFFEE6", end_color="FFFEE6", fill_type="solid"), 
+        'D_Exprezo': PatternFill(start_color="EAF1F5", end_color="EAF1F5", fill_type="solid"), 
+        'E_Gerencia': PatternFill(start_color="F2F0F7", end_color="F2F0F7", fill_type="solid"), 
+        'F_Lideres': PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"), 
+        'G_Nocturnos': PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid"), 
+        'H_Recibo': PatternFill(start_color="EAD1DC", end_color="EAD1DC", fill_type="solid"), 
         'I_Otros Puestos': PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid"),
         'Z_Recesos': PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     }
@@ -382,7 +381,7 @@ if archivo_subido is not None:
         archivo_subido.seek(0) 
         df_crudo = pd.read_excel(archivo_subido)
         
-        with st.spinner("🧠 Organizando y ordenando alfabéticamente con IA..."):
+        with st.spinner("🧠 Optimizando prioridades por Opción B..."):
             excel_bytes, porcentaje, total_gente = generar_reporte_excel(df_crudo)
         
         st.subheader("📈 Estado de Capacitación de la Sucursal")
@@ -398,7 +397,7 @@ if archivo_subido is not None:
         if total_gente == 0:
             st.success("🎉 ¡Felicidades! Todo el personal está al 100%.")
         else:
-            st.success("✅ ¡Horario premium generado y ordenado alfabéticamente!")
+            st.success("✅ ¡Horario premium generado con éxito con prioridades de la Opción B!")
             
             st.download_button(
                 label="📥 Descargar Horario Final", 
