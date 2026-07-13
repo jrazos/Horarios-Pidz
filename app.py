@@ -11,13 +11,18 @@ st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊",
 st.title("🦊 Generador de Horarios de Capacitación - Grupo Zorro")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
+# 1️⃣ RECUAEDRO: Permite ingresar las siglas de la sucursal de forma dinámica
+siglas_sucursal = st.text_input("✍️ Ingresa las siglas de la sucursal (Ej. ZTY):", value="ZTY").strip().upper()
+if not siglas_sucursal:
+    siglas_sucursal = "SUC"
+
 archivo_subido = st.file_uploader("📂 Sube tu archivo aquí (cualquier nombre funciona)", type=['xlsx'])
 
 # ==========================================
-# 🧠 CEREBRO CACHEADO (Opción B - Prioridad Estricta)
+# 🧠 CEREBRO CACHEADO (Súper Optimizado)
 # ==========================================
 @st.cache_data(show_spinner=False)
-def generar_reporte_excel(df_entrada):
+def generar_reporte_excel(df_entrada, siglas):
     df = df_entrada.copy()
     
     # --- LIMPIEZA ---
@@ -51,13 +56,33 @@ def generar_reporte_excel(df_entrada):
         Nombres_Cursos=('Curso_Detalle', lambda x: ', '.join(x))
     ).reset_index()
 
-    # ORDEN DE PRIORIDAD ABSOLUTO: Los que más deben cursos van primero en la fila
     resumen = resumen.sort_values(by='Total_Pendientes', ascending=False)
     cola_colaboradores = resumen.to_dict('records')
     total_colaboradores = len(cola_colaboradores)
 
     horarios = []
     
+    # Diccionarios de fechas para Banner interno y Nombres dinámicos
+    dias_semana = {0: 'lunes', 1: 'martes', 2: 'miércoles', 3: 'jueves', 4: 'viernes', 5: 'sábado', 6: 'domingo'}
+    meses = {1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril', 5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto', 9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'}
+    meses_cortos = {1: 'jul', 2: 'feb', 3: 'mar', 4: 'abr', 5: 'may', 6: 'jun', 7: 'jul', 8: 'ago', 9: 'sep', 10: 'oct', 11: 'nov', 12: 'dic'}
+
+    tz_mx = pytz.timezone('America/Mexico_City')
+    hoy = datetime.now(tz_mx)
+    fecha_inicio_prog = hoy + timedelta(days=1)
+    fecha_fin_prog = fecha_inicio_prog + timedelta(days=6)
+    
+    # Construcción de la Fecha Corta Dinámica (Ej: "semana 13 a 19 jul")
+    dia_in = fecha_inicio_prog.day
+    dia_fi = fecha_fin_prog.day
+    mes_in = meses_cortos.get(fecha_inicio_prog.month, 'mes')
+    
+    if fecha_inicio_prog.month == fecha_fin_prog.month:
+        texto_semana = f"semana {dia_in} a {dia_fi} {mes_in}"
+    else:
+        mes_fi = meses_cortos.get(fecha_fin_prog.month, 'mes')
+        texto_semana = f"semana {dia_in} {mes_in} a {dia_fi} {mes_fi}"
+
     if total_colaboradores > 0:
         def obtener_limite_base(puesto):
             p_lower = str(puesto).lower()
@@ -68,22 +93,10 @@ def generar_reporte_excel(df_entrada):
             else:
                 return 4  
                 
-        limites_semanales = {}
-        sesiones_semana = {}
-        for c in cola_colaboradores:
-            nombre = c['Nombre Completo']
-            limite_puesto = obtener_limite_base(c['Puesto'])
-            # 🎯 REGLA DE TOPE INTELIGENTE: Máximo asignable según su puesto O según los cursos que debe realmente
-            limites_semanales[nombre] = min(limite_puesto, int(c['Total_Pendientes']))
-            sesiones_semana[nombre] = 0
+        limites_semanales = {c['Nombre Completo']: min(obtener_limite_base(c['Puesto']), int(c['Total_Pendientes'])) for c in cola_colaboradores}
+        sesiones_semana = {c['Nombre Completo']: 0 for c in cola_colaboradores}
 
-        tz_mx = pytz.timezone('America/Mexico_City')
-        hoy = datetime.now(tz_mx)
-        fecha_actual = hoy + timedelta(days=1)
-        
-        dias_semana = {0: 'lunes', 1: 'martes', 2: 'miércoles', 3: 'jueves', 4: 'viernes', 5: 'sábado', 6: 'domingo'}
-        meses = {1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril', 5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto', 9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'}
-        
+        fecha_actual = fecha_inicio_prog
         dias_programados = 0
         
         while dias_programados < 7:
@@ -107,7 +120,6 @@ def generar_reporte_excel(df_entrada):
                     hora_actual = fin_bloqueo
                     continue 
                 
-                # 🎯 LÓGICA OPCIÓN B: Cada bloque nuevo busca desde el inicio (índice 0) para asegurar los 4 días al más rezagado
                 encontrado = False
                 for idx_c in range(total_colaboradores):
                     colab = cola_colaboradores[idx_c]
@@ -122,7 +134,7 @@ def generar_reporte_excel(df_entrada):
                         sesiones_semana[nombre] += 1
                         sesiones_hoy[nombre] += 1
                         encontrado = True
-                        break # Asignado con éxito, saltamos al siguiente bloque de tiempo
+                        break 
                 
                 if not encontrado:
                     horarios.append({
@@ -139,33 +151,20 @@ def generar_reporte_excel(df_entrada):
     if not df_horarios.empty:
         df_horarios = df_horarios[df_horarios['Colaborador'] != 'Libre / Sin Asignar'].reset_index(drop=True)
         
-        # --- CLASIFICACIÓN Y ORDENAMIENTO ALFABÉTICO TOTAL ---
         def categorizar_puesto(puesto):
             p_lower = str(puesto).lower()
-            if p_lower == '---': 
-                return 'Z_Recesos' 
-            elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): 
-                return 'E_Gerencia'
-            elif any(k in p_lower for k in ['lider', 'líder', 'checador']): 
-                return 'F_Lideres'
-            elif 'nocturno' in p_lower:
-                return 'G_Nocturnos'
-            elif 'exprezo' in p_lower: 
-                return 'D_Exprezo'
-            elif 'caja' in p_lower or 'cajer' in p_lower: 
-                return 'B_Cajas'
-            elif 'cremeria' in p_lower or 'cremería' in p_lower: 
-                return 'C_Cremeria'
-            elif any(k in p_lower for k in ['surtidor', 'bodega', 'recibo', 'chofer']):
-                return 'H_Recibo'
-            elif any(k in p_lower for k in ['autoservicio', 'perecedero', 'farmacia']): 
-                return 'A_Autoservicio'
-            else: 
-                return 'I_Otros Puestos'
+            if p_lower == '---': return 'Z_Recesos' 
+            elif any(rol in p_lower for rol in ['gerente', 'subgerente', 'comodin', 'comodín', 'administrativa', 'administrativo']): return 'E_Gerencia'
+            elif any(k in p_lower for k in ['lider', 'líder', 'checador']): return 'F_Lideres'
+            elif 'nocturno' in p_lower: return 'G_Nocturnos'
+            elif 'exprezo' in p_lower: return 'D_Exprezo'
+            elif 'caja' in p_lower or 'cajer' in p_lower: return 'B_Cajas'
+            elif 'cremeria' in p_lower or 'cremería' in p_lower: return 'C_Cremeria'
+            elif any(k in p_lower for k in ['surtidor', 'bodega', 'recibo', 'chofer']): return 'H_Recibo'
+            elif any(k in p_lower for k in ['autoservicio', 'perecedero', 'farmacia']): return 'A_Autoservicio'
+            else: return 'I_Otros Puestos'
 
         df_horarios['Categoria_Orden'] = df_horarios['Puesto'].apply(categorizar_puesto)
-        
-        # 🔤 ORDEN ALFABÉTICO PERFECTO (Grupos y Nombres)
         df_horarios = df_horarios.sort_values(by=['Categoria_Orden', 'Colaborador', 'Fecha y Horario']).reset_index(drop=True)
         
         rows_with_headers = []
@@ -206,7 +205,9 @@ def generar_reporte_excel(df_entrada):
     output = io.BytesIO()
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.title = 'Horarios'
+    
+    # 🎯 CAMBIO PIDZ: Título de la pestaña interna (máximo 31 caracteres para Excel)
+    worksheet.title = f"Horarios PIDZ {siglas} {texto_semana}"[:31]
     
     borde = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
     font_blanca = Font(color="FFFFFF", bold=True, size=11)
@@ -247,8 +248,8 @@ def generar_reporte_excel(df_entrada):
     
     worksheet.merge_cells('A1:E2')
     celda_titulo = worksheet['A1']
-    celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | AVANCE DE SUCURSAL: {porcentaje_avance:.1f}%"
-    celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=16)
+    celda_titulo.value = f"REPORTE SEMANAL DE CAPACITACIÓN | SUCURSAL {siglas} | {texto_semana.upper()}"
+    celda_titulo.font = Font(color="FFFFFF" if porcentaje_avance < 50 or porcentaje_avance >= 85 else "000000", bold=True, size=14)
     celda_titulo.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
     celda_titulo.alignment = align_center
     
@@ -371,7 +372,11 @@ def generar_reporte_excel(df_entrada):
         worksheet.row_dimensions[r].height = 28
 
     workbook.save(output)
-    return output.getvalue(), porcentaje_avance, total_colaboradores
+    
+    # 🎯 CAMBIO PIDZ: Formato limpio para la descarga (Ej: "Horarios PIDZ ZTY semana 13 a 19 jul.xlsx")
+    nombre_archivo_final = f"Horarios PIDZ {siglas} {texto_semana}.xlsx"
+    
+    return output.getvalue(), porcentaje_avance, total_colaboradores, nombre_archivo_final
 
 # ==========================================
 # 🚀 INTERFAZ PRINCIPAL 
@@ -381,8 +386,8 @@ if archivo_subido is not None:
         archivo_subido.seek(0) 
         df_crudo = pd.read_excel(archivo_subido)
         
-        with st.spinner("🧠 Optimizando prioridades por Opción B..."):
-            excel_bytes, porcentaje, total_gente = generar_reporte_excel(df_crudo)
+        with st.spinner("🧠 Generando horario PIDZ con tu sucursal..."):
+            excel_bytes, porcentaje, total_gente, nombre_descarga = generar_reporte_excel(df_crudo, siglas_sucursal)
         
         st.subheader("📈 Estado de Capacitación de la Sucursal")
         if porcentaje >= 85:
@@ -397,12 +402,12 @@ if archivo_subido is not None:
         if total_gente == 0:
             st.success("🎉 ¡Felicidades! Todo el personal está al 100%.")
         else:
-            st.success("✅ ¡Horario premium generado con éxito con prioridades de la Opción B!")
+            st.success(f"✅ ¡Horario generado con éxito para la sucursal {siglas_sucursal}!")
             
             st.download_button(
                 label="📥 Descargar Horario Final", 
                 data=excel_bytes, 
-                file_name="Horarios_Zorro_Premium.xlsx", 
+                file_name=nombre_descarga, 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
