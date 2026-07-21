@@ -11,7 +11,7 @@ st.set_page_config(page_title="Generador de Horarios - Zorro", page_icon="🦊",
 st.title("🦊 Generador de Horarios de Capacitación - Grupo Zorro")
 st.write("Sube el reporte de Excel para organizar automáticamente a tu equipo esta semana.")
 
-# 1️⃣ RECUAEDRO: Permite ingresar las siglas de la sucursal de forma dinámica
+# 1️⃣ RECUADRO: Permite ingresar las siglas de la sucursal de forma dinámica
 siglas_sucursal = st.text_input("✍️ Ingresa las siglas de la sucursal (Ej. ZTY):", value="ZTY").strip().upper()
 if not siglas_sucursal:
     siglas_sucursal = "SUC"
